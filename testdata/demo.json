@@ -1,0 +1,13 @@
+{
+  "name": "demo",
+  "scripts": [
+    {
+      "name": "hello",
+      "source": "msg 1 {Hello world}\nend"
+    },
+    {
+      "name": "warp",
+      "source": "tp 0 0 10 10\nend"
+    }
+  ]
+}
