@@ -1,9 +1,12 @@
 //! Component 3 – the functional core.
 //!
 //! For the moment we only care about assembling scripts into byte-code.
-
 pub mod ast;
+pub mod lexer;
+pub mod parser;
 pub mod vm;
+
+pub use ast::{Cmd, Condition, Location, Script};
 
 use crate::model::{ProcessedProject, RawProject};
 use anyhow::Result;

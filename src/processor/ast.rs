@@ -9,16 +9,23 @@ pub enum Location {
 
 #[derive(Debug, Clone, PartialEq)]
 
+pub enum Branch {
+    ThenElse(Box<Cmd>, Box<Cmd>),
+    Then(Box<Cmd>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+
 pub enum Condition {
-    FlagSet(u16), // `flag_X`
-    FlagClear(u16), // `!flag_X`
-                  // more variants later: TileEq, VarEq, etc.
+    FlagSet(String), // `flag_X`
+    FlagClear(String), // `!flag_X`
+                     // more variants later: TileEq, VarEq, etc.
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Cmd {
-    /// `msg <tile> {text}` – show text when selecting a tile.
-    Msg { tile: u16, text: String },
+    /// `msg {text}` – show text when selecting a tile.
+    Msg { text: String },
 
     /// `tmsg @loc1 {text}` – shorthand that uses two map
     /// locations instead of raw tile numbers.
@@ -30,23 +37,21 @@ pub enum Cmd {
     /// `if <condition> { … } [else { … }]`.
     If {
         condition: Condition,
-        then_branch: Vec<Cmd>,
-        else_branch: Vec<Cmd>,
+        branches: Branch,
     },
 
     /// `setflag flag_X`
-    SetFlag { flag: u16 },
+    SetFlag { flag: String },
 
     /// `unsetflag flag_X`
-    UnsetFlag { flag: u16 },
+    UnsetFlag { flag: String },
 
     /// `readflag flag_X` – push its value on the VM stack.
-    ReadFlag { flag: u16 },
+    ReadFlag { flag: String },
 
     /// Script terminator (implicit if omitted).
     End,
 }
-
 impl Cmd {
     /// Simple array whose order defines the *numeric opcode* that will be
     /// used in the generated C++ enum (index == opcode).
