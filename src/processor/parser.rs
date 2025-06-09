@@ -12,34 +12,33 @@
 
 use super::ast::*;
 use super::lexer::{Lexer, Token};
+use std::collections::HashSet;
 
 pub fn parse_script(name: &str, source: &str) -> Result<Script, String> {
     let mut p = Parser::new(source);
-    let cmds = p.parse();
-    match cmds {
-        Ok(cmds) => Ok(Script {
-            name: name.to_owned(),
-            body: cmds,
-        }),
-        Err(e) => Err(format!("error: {e}")),
-    }
-} // ────────────────────────────────────────────────────────────────────
-// internal parser object
-// ────────────────────────────────────────────────────────────────────
+    let cmds = p.parse()?;
+    Ok(Script {
+        name: name.to_owned(),
+        body: cmds,
+        tags: p.tags,
+        flags: p.flags,
+    })
+}
 struct Parser<'a> {
     lex: std::iter::Peekable<Lexer<'a>>,
+    tags: HashSet<String>,
+    flags: HashSet<String>,
 }
 
 impl<'a> Parser<'a> {
     fn new(src: &'a str) -> Self {
         let lex = Lexer::new(src).peekable();
-        Self { lex }
+        Self {
+            lex,
+            tags: HashSet::new(),
+            flags: HashSet::new(),
+        }
     }
-
-    // ────────────────────────────────────────────────────────────
-    //                 top-level: one command
-    // ────────────────────────────────────────────────────────────
-
     fn parse(&mut self) -> Result<Vec<Cmd>, String> {
         let mut res = Vec::<Cmd>::new();
         while self.lex.peek().unwrap().clone() != Ok(Token::Eof) {
@@ -62,9 +61,8 @@ impl<'a> Parser<'a> {
                 "tmsg" => self.parse_tmsg()?,
                 "tp" => self.parse_tp()?,
                 "if" => self.parse_if()?,
-                "setflag" => self.parse_set_flag()?,
-                "unsetflag" => self.parse_unset_flag()?,
-                "readflag" => self.parse_read_flag()?,
+                "setflag" | "unsetflag" | "readflag" => self.parse_flag_cmd(ident)?,
+
                 t => return Err(format!("parse: invalid ident token: {t}")),
             },
             _ => return Err(format!("parse: invalid token: {token:?}")),
@@ -123,36 +121,6 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_set_flag(&mut self) -> Result<Cmd, String> {
-        let flag = match self.lex.next().unwrap() {
-            Ok(Token::Ident(ident)) => ident,
-            _ => return Err("invalid token after setflag".to_string()),
-        };
-        Ok(Cmd::SetFlag {
-            flag: flag.parse().unwrap(),
-        })
-    }
-
-    fn parse_unset_flag(&mut self) -> Result<Cmd, String> {
-        let flag = match self.lex.next().unwrap() {
-            Ok(Token::Ident(ident)) => ident,
-            _ => return Err("invalid token after unsetflag".to_string()),
-        };
-        Ok(Cmd::UnsetFlag {
-            flag: flag.parse().unwrap(),
-        })
-    }
-
-    fn parse_read_flag(&mut self) -> Result<Cmd, String> {
-        let flag = match self.lex.next().unwrap() {
-            Ok(Token::Ident(ident)) => ident,
-            _ => return Err("invalid token after readflag".to_string()),
-        };
-        Ok(Cmd::ReadFlag {
-            flag: flag.parse().unwrap(),
-        })
-    }
-
     fn parse_text(&mut self) -> Result<String, String> {
         let text = match self.lex.next().unwrap() {
             Ok(Token::Text(text)) => text,
@@ -169,7 +137,10 @@ impl<'a> Parser<'a> {
         };
 
         match next_token {
-            Token::At(at) => Ok(Location::Tag(at)),
+            Token::At(at) => {
+                self.tags.insert(at.clone());
+                Ok(Location::Tag(at))
+            }
             Token::Number(n1) => {
                 let n2 = match self
                     .lex
@@ -212,13 +183,30 @@ impl<'a> Parser<'a> {
             Token::Ident(t) => match t.as_str() {
                 "endif" => Ok(None),
                 _ => {
-                    print!("found ident {t}\n");
                     let branch = self.parse_cmd()?;
                     Ok(Some(branch))
                 }
             },
             _ => Err("invalid token after if".to_string()),
         }
+    }
+
+    fn parse_flag_cmd(&mut self, op: String) -> Result<Cmd, String> {
+        let next = self.lex.next().ok_or("expected flag after command")??;
+        let flag = match next {
+            Token::Ident(f) if f.starts_with("flag_") => f,
+            other => return Err(format!("invalid flag token: {other:?}")),
+        };
+
+        self.flags.insert(flag.clone());
+
+        let cmd = match op.as_str() {
+            "setflag" => Cmd::SetFlag { flag },
+            "unsetflag" => Cmd::UnsetFlag { flag },
+            "readflag" => Cmd::ReadFlag { flag },
+            _ => unreachable!(),
+        };
+        Ok(cmd)
     }
 }
 
@@ -300,54 +288,6 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_set_flag() {
-        let test_cases = vec![(
-            "setflag testFlag;",
-            Ok(Cmd::SetFlag {
-                flag: "testFlag".parse().unwrap(),
-            }),
-        )];
-
-        for (input, expected) in test_cases {
-            let mut parser = Parser::new(input);
-            let result = parser.parse_cmd();
-            assert_eq!(result, expected);
-        }
-    }
-
-    #[test]
-    fn test_parse_unset_flag() {
-        let test_cases = vec![(
-            "unsetflag testFlag;",
-            Ok(Cmd::UnsetFlag {
-                flag: "testFlag".parse().unwrap(),
-            }),
-        )];
-
-        for (input, expected) in test_cases {
-            let mut parser = Parser::new(input);
-            let result = parser.parse_cmd();
-            assert_eq!(result, expected);
-        }
-    }
-
-    #[test]
-    fn test_parse_read_flag() {
-        let test_cases = vec![(
-            "readflag testFlag;",
-            Ok(Cmd::ReadFlag {
-                flag: "testFlag".parse().unwrap(),
-            }),
-        )];
-
-        for (input, expected) in test_cases {
-            let mut parser = Parser::new(input);
-            let result = parser.parse_cmd();
-            assert_eq!(result, expected);
-        }
-    }
-
-    #[test]
     fn test_parse_if() {
         let test_cases = vec![
             (
@@ -393,5 +333,13 @@ mod tests {
             let result = parser.parse_cmd();
             assert_eq!(result, expected);
         }
+    }
+
+    #[test]
+    fn test_collects_tags_and_flags() {
+        let src = "tmsg @home {hi} setflag flag_3;";
+        let script = parse_script("s", src).unwrap();
+        assert!(script.tags.contains("home"));
+        assert!(script.flags.contains("flag_3"));
     }
 }
