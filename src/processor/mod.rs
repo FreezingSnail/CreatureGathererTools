@@ -3,20 +3,17 @@
 //! For the moment we only care about assembling scripts into byte-code.
 pub mod ast;
 pub mod lexer;
-pub mod parser;
+pub mod script_parser;
 pub mod vm;
 
-pub use ast::{Cmd, Condition, Location, Script};
+pub use crate::model::Script;
 
 use crate::model::{ProcessedProject, RawProject};
 use anyhow::Result;
 
 /// Runs every processing pass and returns a read-only structure for writers.
 pub fn run(raw: &RawProject) -> Result<ProcessedProject> {
-    let vm_scripts = vm::assemble_all(&raw.scripts)?;
+    let vm_scripts = vm::assemble_all(&raw.scripts.objects)?;
 
-    Ok(ProcessedProject {
-        name: raw.name.clone(),
-        vm: vm_scripts,
-    })
+    Ok(ProcessedProject { vm: vm_scripts })
 }

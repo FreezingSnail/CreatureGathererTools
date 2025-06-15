@@ -13,7 +13,7 @@ pub fn run() -> anyhow::Result<()> {
     // 1. ── Parse ──────────────────────────────────────────────────────
     let json = std::fs::read_to_string(&args.input)
         .with_context(|| format!("Reading {}", args.input.display()))?;
-    let raw_project = parser::load_from_json(&json).with_context(|| "Parsing input JSON")?;
+    let raw_project = parser::load(&json).with_context(|| "Parsing input JSON")?;
 
     // 2. ── Process ────────────────────────────────────────────────────
     let processed =

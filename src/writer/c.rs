@@ -7,7 +7,7 @@ use std::io::{self, Write};
 use std::path::Path;
 
 pub fn emit(project: &ProcessedProject, out_dir: &Path) -> io::Result<()> {
-    let mut h = File::create(out_dir.join(format!("{}_scripts.h", project.name)))?;
+    let mut h = File::create(out_dir.join(format!("{}_scripts.h", "world")))?;
 
     writeln!(h, "#pragma once")?;
     writeln!(h, "#include <cstdint>")?;
@@ -25,16 +25,8 @@ pub fn emit(project: &ProcessedProject, out_dir: &Path) -> io::Result<()> {
     // ---------------------------------------------------------------
     // 2. Script blob & size symbols
     // ---------------------------------------------------------------
-    writeln!(
-        h,
-        "extern const uint8_t  {n}_scripts_bin[];",
-        n = project.name
-    )?;
-    writeln!(
-        h,
-        "extern const uint32_t {n}_scripts_size;",
-        n = project.name
-    )?;
+    writeln!(h, "extern const uint8_t  {n}_scripts_bin[];", n = "world")?;
+    writeln!(h, "extern const uint32_t {n}_scripts_size;", n = "world")?;
 
     Ok(())
 }
