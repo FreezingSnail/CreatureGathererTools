@@ -1,0 +1,50 @@
+{
+    "draworder": "topdown",
+    "id": 3,
+    "name": "Object Layer 1",
+    "objects": [
+        {
+            "height": 0,
+            "id": 5,
+            "name": "",
+            "point": true,
+            "properties": [
+                {
+                    "name": "script",
+                    "type": "string",
+                    "value": "tp @test_teleport @test_house"
+                }
+            ],
+            "rotation": 0,
+            "type": "",
+            "visible": true,
+            "width": 0,
+            "x": 7.82610097157442,
+            "y": 75.3462185179447
+        },
+        {
+            "height": 0,
+            "id": 6,
+            "name": "",
+            "point": true,
+            "properties": [
+                {
+                    "name": "script",
+                    "type": "string",
+                    "value": "tp @test_house @test_teleport"
+                }
+            ],
+            "rotation": 0,
+            "type": "",
+            "visible": true,
+            "width": 0,
+            "x": 135.686095436903,
+            "y": 75.0187546886722
+        }
+    ],
+    "opacity": 1,
+    "type": "objectgroup",
+    "visible": true,
+    "x": 0,
+    "y": 0
+}

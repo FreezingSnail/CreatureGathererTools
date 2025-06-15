@@ -10,34 +10,53 @@
 //!   readflag   flag_<n>
 //!   end
 
+use crate::model::{ParsedScripts, Script, ScriptLayer};
+
 use super::ast::*;
 use super::lexer::{Lexer, Token};
 use std::collections::HashSet;
 
-pub fn parse_script(name: &str, source: &str) -> Result<Script, String> {
-    let mut p = Parser::new(source);
-    let cmds = p.parse()?;
-    Ok(Script {
-        name: name.to_owned(),
-        body: cmds,
-        tags: p.tags,
-        flags: p.flags,
+pub fn parse_scripts(scripts: ScriptLayer) -> Result<ParsedScripts, String> {
+    let mut parsed_scripts = Vec::<Script>::new();
+    let mut controller = Controller::new();
+    for script in scripts.objects {
+        let mut p = Parser::new(&script.script, controller);
+        let cmds = p.parse()?;
+        parsed_scripts.push(Script {
+            body: cmds,
+            x: script.x as i32,
+            y: script.y as i32,
+        });
+        controller = p.controller;
+    }
+    Ok(ParsedScripts {
+        scripts: parsed_scripts,
+        tags: controller.tags,
+        flags: controller.flags,
     })
 }
-struct Parser<'a> {
-    lex: std::iter::Peekable<Lexer<'a>>,
+struct Controller {
     tags: HashSet<String>,
     flags: HashSet<String>,
 }
-
-impl<'a> Parser<'a> {
-    fn new(src: &'a str) -> Self {
-        let lex = Lexer::new(src).peekable();
+impl Controller {
+    fn new() -> Self {
         Self {
-            lex,
             tags: HashSet::new(),
             flags: HashSet::new(),
         }
+    }
+}
+
+struct Parser<'a> {
+    lex: std::iter::Peekable<Lexer<'a>>,
+    controller: Controller,
+}
+
+impl<'a> Parser<'a> {
+    fn new(src: &'a str, controller: Controller) -> Self {
+        let lex = Lexer::new(src).peekable();
+        Self { lex, controller }
     }
     fn parse(&mut self) -> Result<Vec<Cmd>, String> {
         let mut res = Vec::<Cmd>::new();
@@ -115,6 +134,22 @@ impl<'a> Parser<'a> {
             None => Branch::Then(Box::new(then_branch)),
         };
 
+        match branches {
+            Branch::ThenElse(_, _) => {
+                let endif = match self.lex.next().unwrap() {
+                    Ok(Token::Ident(ident)) => match ident.as_str() {
+                        "endif" => true,
+                        _ => false,
+                    },
+                    _ => return Err("invalid token after tp".to_string()),
+                };
+                if !endif {
+                    return Err("invalid token after if, expected endif".to_string());
+                }
+            }
+            _ => {}
+        }
+
         Ok(Cmd::If {
             condition,
             branches,
@@ -138,7 +173,7 @@ impl<'a> Parser<'a> {
 
         match next_token {
             Token::At(at) => {
-                self.tags.insert(at.clone());
+                self.controller.tags.insert(at.clone());
                 Ok(Location::Tag(at))
             }
             Token::Number(n1) => {
@@ -198,7 +233,7 @@ impl<'a> Parser<'a> {
             other => return Err(format!("invalid flag token: {other:?}")),
         };
 
-        self.flags.insert(flag.clone());
+        self.controller.flags.insert(flag.clone());
 
         let cmd = match op.as_str() {
             "setflag" => Cmd::SetFlag { flag },
@@ -212,6 +247,8 @@ impl<'a> Parser<'a> {
 
 #[cfg(test)]
 mod tests {
+    use crate::model::ScriptEntry;
+
     use super::*;
 
     #[test]
@@ -224,7 +261,7 @@ mod tests {
         )];
 
         for (input, expected) in test_cases {
-            let mut parser = Parser::new(input);
+            let mut parser = Parser::new(input, Controller::new());
             let result = parser.parse_cmd();
             assert_eq!(result, expected);
         }
@@ -241,7 +278,7 @@ mod tests {
         )];
 
         for (input, expected) in test_cases {
-            let mut parser = Parser::new(input);
+            let mut parser = Parser::new(input, Controller::new());
             let result = parser.parse_cmd();
             assert_eq!(result, expected);
         }
@@ -281,7 +318,7 @@ mod tests {
         ];
 
         for (input, expected) in test_cases {
-            let mut parser = Parser::new(input);
+            let mut parser = Parser::new(input, Controller::new());
             let result = parser.parse_cmd();
             assert_eq!(result, expected);
         }
@@ -329,7 +366,8 @@ mod tests {
 
         for (input, expected) in test_cases {
             println!("Testing: {input}");
-            let mut parser = Parser::new(input);
+
+            let mut parser = Parser::new(input, Controller::new());
             let result = parser.parse_cmd();
             assert_eq!(result, expected);
         }
@@ -337,9 +375,19 @@ mod tests {
 
     #[test]
     fn test_collects_tags_and_flags() {
-        let src = "tmsg @home {hi} setflag flag_3;";
-        let script = parse_script("s", src).unwrap();
-        assert!(script.tags.contains("home"));
-        assert!(script.flags.contains("flag_3"));
+        let script = "if flag_A then setflag flag_B else unsetflag flag_C endif;";
+        //                         "if flag_X then setflag flag_Y else unsetflag flag_Y endif;"
+        let script_entry = ScriptEntry {
+            script: script.to_string(),
+            x: 0 as f32,
+            y: 0 as f32,
+        };
+
+        let script_layer = ScriptLayer {
+            objects: vec![script_entry],
+        };
+        let parsed_scripts = parse_scripts(script_layer).unwrap();
+        assert_eq!(parsed_scripts.tags.len(), 0);
+        assert_eq!(parsed_scripts.flags.len(), 2);
     }
 }

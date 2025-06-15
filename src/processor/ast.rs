@@ -66,14 +66,3 @@ impl Cmd {
         "End",
     ];
 }
-
-/// One complete script.
-use std::collections::HashSet;
-
-#[derive(Debug, Clone)]
-pub struct Script {
-    pub name: String,
-    pub body: Vec<Cmd>,
-    pub tags: HashSet<String>,
-    pub flags: HashSet<String>,
-}
