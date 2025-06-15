@@ -14,7 +14,7 @@ use crate::model::{ParsedScripts, Script, ScriptLayer};
 
 use super::ast::*;
 use super::lexer::{Lexer, Token};
-use std::collections::HashSet;
+use std::collections::HashMap;
 
 pub fn parse_scripts(scripts: ScriptLayer) -> Result<ParsedScripts, String> {
     let mut parsed_scripts = Vec::<Script>::new();
@@ -36,15 +36,50 @@ pub fn parse_scripts(scripts: ScriptLayer) -> Result<ParsedScripts, String> {
     })
 }
 struct Controller {
-    tags: HashSet<String>,
-    flags: HashSet<String>,
+    tags: HashMap<String, u16>,
+    flags: HashMap<String, u16>,
+    text: HashMap<String, u16>,
+    tag_count: u16,
+    flag_count: u16,
+    text_count: u16,
 }
 impl Controller {
     fn new() -> Self {
         Self {
-            tags: HashSet::new(),
-            flags: HashSet::new(),
+            tags: HashMap::new(),
+            flags: HashMap::new(),
+            text: HashMap::new(),
+            tag_count: 0,
+            flag_count: 0,
+            text_count: 0,
         }
+    }
+
+    fn insert_tag(&mut self, tag: &String) -> u16 {
+        if !self.tags.contains_key(tag) {
+            self.tags.insert(tag.clone(), self.tag_count);
+            self.tag_count += 1;
+        }
+        let v = self.tags.get(tag).unwrap();
+        *v
+    }
+    fn insert_flag(&mut self, flag: &String) -> u16 {
+        if !self.flags.contains_key(flag) {
+            self.flags.insert(flag.clone(), self.flag_count);
+            self.flag_count += 1;
+        }
+
+        let v = self.flags.get(flag).unwrap();
+        *v
+    }
+    fn insert_text(&mut self, text: &String) -> u16 {
+        if !self.text.contains_key(text) {
+            self.text.insert(text.clone(), self.flag_count);
+            self.text_count += 1;
+        }
+
+        let v = self.text.get(text).unwrap();
+        *v
     }
 }
 
@@ -91,15 +126,25 @@ impl<'a> Parser<'a> {
     }
     fn parse_msg(&mut self) -> Result<Cmd, String> {
         let text = self.parse_text()?;
-        Ok(Cmd::Msg { text: text.into() })
+        let i = self.controller.insert_text(&text);
+        Ok(Cmd::Msg {
+            text: Text {
+                text: text,
+                index: i,
+            },
+        })
     }
 
     fn parse_tmsg(&mut self) -> Result<Cmd, String> {
         let loc = self.parse_location()?;
         let text = self.parse_text()?;
+        let i = self.controller.insert_text(&text);
         Ok(Cmd::TMsg {
             at: loc,
-            text: text.into(),
+            text: Text {
+                text: text,
+                index: i,
+            },
         })
     }
 
@@ -173,8 +218,8 @@ impl<'a> Parser<'a> {
 
         match next_token {
             Token::At(at) => {
-                self.controller.tags.insert(at.clone());
-                Ok(Location::Tag(at))
+                let i = self.controller.insert_tag(&at);
+                Ok(Location::Tag(Text { text: at, index: i }))
             }
             Token::Number(n1) => {
                 let n2 = match self
@@ -201,8 +246,20 @@ impl<'a> Parser<'a> {
         };
 
         match next_token {
-            Token::Ident(flag) => Ok(Condition::FlagSet(flag)),
-            Token::Bang(flag) => Ok(Condition::FlagClear(flag)),
+            Token::Ident(flag) => {
+                let i = self.controller.insert_flag(&flag);
+                Ok(Condition::FlagSet(Text {
+                    text: flag,
+                    index: i,
+                }))
+            }
+            Token::Bang(flag) => {
+                let i = self.controller.insert_flag(&flag);
+                Ok(Condition::FlagClear(Text {
+                    text: flag,
+                    index: i,
+                }))
+            }
             _ => Err("invalid token after if".to_string()),
         }
     }
@@ -233,12 +290,27 @@ impl<'a> Parser<'a> {
             other => return Err(format!("invalid flag token: {other:?}")),
         };
 
-        self.controller.flags.insert(flag.clone());
+        let i = self.controller.insert_flag(&flag);
 
         let cmd = match op.as_str() {
-            "setflag" => Cmd::SetFlag { flag },
-            "unsetflag" => Cmd::UnsetFlag { flag },
-            "readflag" => Cmd::ReadFlag { flag },
+            "setflag" => Cmd::SetFlag {
+                flag: Text {
+                    text: flag,
+                    index: i,
+                },
+            },
+            "unsetflag" => Cmd::UnsetFlag {
+                flag: Text {
+                    text: flag,
+                    index: i,
+                },
+            },
+            "readflag" => Cmd::ReadFlag {
+                flag: Text {
+                    text: flag,
+                    index: i,
+                },
+            },
             _ => unreachable!(),
         };
         Ok(cmd)
@@ -256,7 +328,10 @@ mod tests {
         let test_cases = vec![(
             "msg {hello world};",
             Ok(Cmd::Msg {
-                text: "hello world".into(),
+                text: Text {
+                    text: "hello world".into(),
+                    index: 0,
+                },
             }),
         )];
 
@@ -272,8 +347,14 @@ mod tests {
         let test_cases = vec![(
             "tmsg @testLoc {hello world};",
             Ok(Cmd::TMsg {
-                at: Location::Tag("testLoc".into()),
-                text: "hello world".into(),
+                at: Location::Tag(Text {
+                    text: "testLoc".into(),
+                    index: 0,
+                }),
+                text: Text {
+                    text: "hello world".into(),
+                    index: 0,
+                },
             }),
         )];
 
@@ -283,21 +364,29 @@ mod tests {
             assert_eq!(result, expected);
         }
     }
-
     #[test]
     fn test_parse_tp() {
         let test_cases = vec![
             (
                 "tp @loc1 @loc2;",
                 Ok(Cmd::Tp {
-                    from: Location::Tag("loc1".into()),
-                    to: Location::Tag("loc2".into()),
+                    from: Location::Tag(Text {
+                        text: "loc1".into(),
+                        index: 0,
+                    }),
+                    to: Location::Tag(Text {
+                        text: "loc2".into(),
+                        index: 1,
+                    }),
                 }),
             ),
             (
                 "tp @loc1 1 2;",
                 Ok(Cmd::Tp {
-                    from: Location::Tag("loc1".into()),
+                    from: Location::Tag(Text {
+                        text: "loc1".into(),
+                        index: 0,
+                    }),
                     to: Location::Cords(1, 2),
                 }),
             ),
@@ -305,7 +394,10 @@ mod tests {
                 "tp 1 2 @loc1;",
                 Ok(Cmd::Tp {
                     from: Location::Cords(1, 2),
-                    to: Location::Tag("loc1".into()),
+                    to: Location::Tag(Text {
+                        text: "loc1".into(),
+                        index: 0,
+                    }),
                 }),
             ),
             (
@@ -330,13 +422,22 @@ mod tests {
             (
                 "if flag_X then setflag flag_Y else unsetflag flag_Y endif;",
                 Ok(Cmd::If {
-                    condition: Condition::FlagSet("flag_X".parse().unwrap()),
+                    condition: Condition::FlagSet(Text {
+                        text: "flag_X".into(),
+                        index: 0,
+                    }),
                     branches: Branch::ThenElse(
                         Box::new(Cmd::SetFlag {
-                            flag: "flag_Y".parse().unwrap(),
+                            flag: Text {
+                                text: "flag_Y".into(),
+                                index: 1,
+                            },
                         }),
                         Box::new(Cmd::UnsetFlag {
-                            flag: "flag_Y".parse().unwrap(),
+                            flag: Text {
+                                text: "flag_Y".into(),
+                                index: 1,
+                            },
                         }),
                     ),
                 }),
@@ -344,20 +445,35 @@ mod tests {
             (
                 "if flag_X then setflag flag_Y endif;",
                 Ok(Cmd::If {
-                    condition: Condition::FlagSet("flag_X".parse().unwrap()),
+                    condition: Condition::FlagSet(Text {
+                        text: "flag_X".into(),
+                        index: 0,
+                    }),
                     branches: Branch::Then(Box::new(Cmd::SetFlag {
-                        flag: "flag_Y".parse().unwrap(),
+                        flag: Text {
+                            text: "flag_Y".into(),
+                            index: 1,
+                        },
                     })),
                 }),
             ),
             (
                 "if flag_X then if flag_Y then setflag flag_Z endif endif;",
                 Ok(Cmd::If {
-                    condition: Condition::FlagSet("flag_X".parse().unwrap()),
+                    condition: Condition::FlagSet(Text {
+                        text: "flag_X".into(),
+                        index: 0,
+                    }),
                     branches: Branch::Then(Box::new(Cmd::If {
-                        condition: Condition::FlagSet("flag_Y".parse().unwrap()),
+                        condition: Condition::FlagSet(Text {
+                            text: "flag_Y".into(),
+                            index: 1,
+                        }),
                         branches: Branch::Then(Box::new(Cmd::SetFlag {
-                            flag: "flag_Z".parse().unwrap(),
+                            flag: Text {
+                                text: "flag_Z".into(),
+                                index: 2,
+                            },
                         })),
                     })),
                 }),
@@ -376,7 +492,6 @@ mod tests {
     #[test]
     fn test_collects_tags_and_flags() {
         let script = "if flag_A then setflag flag_B else unsetflag flag_C endif;";
-        //                         "if flag_X then setflag flag_Y else unsetflag flag_Y endif;"
         let script_entry = ScriptEntry {
             script: script.to_string(),
             x: 0 as f32,
@@ -388,6 +503,6 @@ mod tests {
         };
         let parsed_scripts = parse_scripts(script_layer).unwrap();
         assert_eq!(parsed_scripts.tags.len(), 0);
-        assert_eq!(parsed_scripts.flags.len(), 2);
+        assert_eq!(parsed_scripts.flags.len(), 3);
     }
 }
