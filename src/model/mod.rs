@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
@@ -65,6 +65,6 @@ pub struct Script {
 
 pub struct ParsedScripts {
     pub scripts: Vec<Script>,
-    pub tags: HashSet<String>,
-    pub flags: HashSet<String>,
+    pub tags: HashMap<String, u16>,
+    pub flags: HashMap<String, u16>,
 }
