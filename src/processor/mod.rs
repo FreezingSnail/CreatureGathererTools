@@ -13,7 +13,8 @@ use anyhow::Result;
 
 /// Runs every processing pass and returns a read-only structure for writers.
 pub fn run(raw: &RawProject) -> Result<ProcessedProject> {
-    let vm_scripts = vm::assemble_all(&raw.scripts.objects)?;
+    //    let vm_scripts = vm::assemble_scripts(&raw)?;
 
-    Ok(ProcessedProject { vm: vm_scripts })
+    //  Ok(ProcessedProject { vm: vm_scripts })
+    unimplemented!()
 }

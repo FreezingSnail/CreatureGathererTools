@@ -3,7 +3,6 @@ pub mod model;
 pub mod parser;
 pub mod processor;
 pub mod writer;
-
 use anyhow::Context;
 use clap::Parser;
 

@@ -1,6 +1,35 @@
+// numeric constants that describe the world / chunk grid
+pub const MAP_W: i32 = 256;
+pub const MAP_H: i32 = 256;
+
+pub const CHUNK_W: i32 = 8;
+pub const CHUNK_H: i32 = 4;
+
+pub const CHUNK_COLS: i32 = MAP_W / CHUNK_W; // 32
+pub const CHUNK_ROWS: i32 = MAP_H / CHUNK_H; // 64
+pub const TOTAL_CHUNKS: usize = (CHUNK_COLS * CHUNK_ROWS) as usize;
+
+use crate::processor::ast::Cmd;
+use serde::Deserialize;
 use std::collections::HashMap;
 
-use serde::{Deserialize, Serialize};
+#[derive(Debug, Clone)]
+pub struct Script {
+    pub body: Vec<Cmd>,
+    pub x: i32,
+    pub y: i32,
+}
+
+#[derive(Debug, Clone)]
+pub struct ParsedScripts {
+    /// Chunked representation; `chunks[idx]` holds all scripts that belong
+    /// to that chunk – vector length is always `TOTAL_CHUNKS`.
+    pub chunks: Vec<Vec<Script>>,
+
+    pub tags: HashMap<String, u8>,
+    pub flags: HashMap<String, u8>,
+    pub texts: HashMap<String, u16>,
+}
 
 /// Entire project as it comes out of the JSON loader.
 ///
@@ -51,20 +80,7 @@ pub struct RawProject {
 
 /// Fully processed output handed to `writer`.
 /// (Will contain map, tiles, etc. later; right now only the VM part.)
-use crate::processor::{ast::Cmd, vm};
+use crate::processor::vm;
 pub struct ProcessedProject {
     pub vm: vm::ProcessedScripts,
-}
-
-#[derive(Debug, Clone)]
-pub struct Script {
-    pub body: Vec<Cmd>,
-    pub x: i32,
-    pub y: i32,
-}
-
-pub struct ParsedScripts {
-    pub scripts: Vec<Script>,
-    pub tags: HashMap<String, u16>,
-    pub flags: HashMap<String, u16>,
 }

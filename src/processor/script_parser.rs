@@ -1,7 +1,7 @@
 //! Parser that consumes the lexer and builds a `Script` AST.
 //!
 //! Supported commands (first slice):
-//!   msg     <tile:u16>                 {text}
+//!   msg     <tile:u8>                 {text}
 //!   tmsg    @loc1  @loc2               {text}
 //!   tp      x1 y1 x2 y2
 //!   tp      @loc1  @loc2
@@ -10,37 +10,57 @@
 //!   readflag   flag_<n>
 //!   end
 
-use crate::model::{ParsedScripts, Script, ScriptLayer};
+use crate::model::{
+    CHUNK_COLS, CHUNK_H, CHUNK_W, ParsedScripts, Script, ScriptLayer, TOTAL_CHUNKS,
+};
 
 use super::ast::*;
 use super::lexer::{Lexer, Token};
 use std::collections::HashMap;
 
 pub fn parse_scripts(scripts: ScriptLayer) -> Result<ParsedScripts, String> {
-    let mut parsed_scripts = Vec::<Script>::new();
+    let mut chunks: Vec<Vec<Script>> = vec![Vec::new(); TOTAL_CHUNKS];
+
     let mut controller = Controller::new();
+
     for script in scripts.objects {
         let mut p = Parser::new(&script.script, controller);
         let cmds = p.parse()?;
-        parsed_scripts.push(Script {
+        let x_i = script.x as i32;
+        let y_i = script.y as i32;
+        let s = Script {
             body: cmds,
-            x: script.x as i32,
-            y: script.y as i32,
-        });
+            x: x_i,
+            y: y_i,
+        };
+
+        let idx = chunk_index(x_i, y_i);
+        chunks[idx].push(s.clone());
+
         controller = p.controller;
     }
+
     Ok(ParsedScripts {
-        scripts: parsed_scripts,
+        chunks,
         tags: controller.tags,
         flags: controller.flags,
+        texts: controller.text,
     })
 }
+
+/// Convert map-coordinates into the linear chunk index (0‥2047).
+#[inline]
+fn chunk_index(x: i32, y: i32) -> usize {
+    let cx = x / CHUNK_W; // 0‥31
+    let cy = y / CHUNK_H; // 0‥63
+    (cy * CHUNK_COLS + cx) as usize // row-major (0‥2047)
+}
 struct Controller {
-    tags: HashMap<String, u16>,
-    flags: HashMap<String, u16>,
+    tags: HashMap<String, u8>,
+    flags: HashMap<String, u8>,
     text: HashMap<String, u16>,
-    tag_count: u16,
-    flag_count: u16,
+    tag_count: u8,
+    flag_count: u8,
     text_count: u16,
 }
 impl Controller {
@@ -55,7 +75,7 @@ impl Controller {
         }
     }
 
-    fn insert_tag(&mut self, tag: &String) -> u16 {
+    fn insert_tag(&mut self, tag: &String) -> u8 {
         if !self.tags.contains_key(tag) {
             self.tags.insert(tag.clone(), self.tag_count);
             self.tag_count += 1;
@@ -63,7 +83,7 @@ impl Controller {
         let v = self.tags.get(tag).unwrap();
         *v
     }
-    fn insert_flag(&mut self, flag: &String) -> u16 {
+    fn insert_flag(&mut self, flag: &String) -> u8 {
         if !self.flags.contains_key(flag) {
             self.flags.insert(flag.clone(), self.flag_count);
             self.flag_count += 1;
@@ -74,7 +94,7 @@ impl Controller {
     }
     fn insert_text(&mut self, text: &String) -> u16 {
         if !self.text.contains_key(text) {
-            self.text.insert(text.clone(), self.flag_count);
+            self.text.insert(text.clone(), self.text_count);
             self.text_count += 1;
         }
 
@@ -219,7 +239,10 @@ impl<'a> Parser<'a> {
         match next_token {
             Token::At(at) => {
                 let i = self.controller.insert_tag(&at);
-                Ok(Location::Tag(Text { text: at, index: i }))
+                Ok(Location::Tag(Text {
+                    text: at,
+                    index: i as u16,
+                }))
             }
             Token::Number(n1) => {
                 let n2 = match self
@@ -250,14 +273,14 @@ impl<'a> Parser<'a> {
                 let i = self.controller.insert_flag(&flag);
                 Ok(Condition::FlagSet(Text {
                     text: flag,
-                    index: i,
+                    index: i as u16,
                 }))
             }
             Token::Bang(flag) => {
                 let i = self.controller.insert_flag(&flag);
                 Ok(Condition::FlagClear(Text {
                     text: flag,
-                    index: i,
+                    index: i as u16,
                 }))
             }
             _ => Err("invalid token after if".to_string()),
@@ -296,19 +319,19 @@ impl<'a> Parser<'a> {
             "setflag" => Cmd::SetFlag {
                 flag: Text {
                     text: flag,
-                    index: i,
+                    index: i as u16,
                 },
             },
             "unsetflag" => Cmd::UnsetFlag {
                 flag: Text {
                     text: flag,
-                    index: i,
+                    index: i as u16,
                 },
             },
             "readflag" => Cmd::ReadFlag {
                 flag: Text {
                     text: flag,
-                    index: i,
+                    index: i as u16,
                 },
             },
             _ => unreachable!(),
@@ -504,5 +527,58 @@ mod tests {
         let parsed_scripts = parse_scripts(script_layer).unwrap();
         assert_eq!(parsed_scripts.tags.len(), 0);
         assert_eq!(parsed_scripts.flags.len(), 3);
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  Chunk grouping                                                    */
+    /* ------------------------------------------------------------------ */
+
+    #[test]
+    fn test_chunk_grouping() {
+        use crate::model::{CHUNK_COLS, ScriptEntry};
+
+        //
+        //  World->chunk layout (8×4 tiles per chunk)
+        //
+        //  (0,0) → chunk 0
+        //  (8,0) → chunk 1
+        //  (0,4) → chunk CHUNK_COLS (= 32)
+        //
+        let scripts = vec![
+            ScriptEntry {
+                script: "msg {a};".into(),
+                x: 0.0,
+                y: 0.0, //  chunk 0
+            },
+            ScriptEntry {
+                script: "msg {b};".into(),
+                x: 8.0,
+                y: 0.0, //  chunk 1
+            },
+            ScriptEntry {
+                script: "msg {c};".into(),
+                x: 0.0,
+                y: 4.0, //  first row below → chunk 32
+            },
+        ];
+
+        let layer = ScriptLayer { objects: scripts };
+        let parsed = parse_scripts(layer).expect("scripts parsed");
+
+        // chunk 0 must contain (0,0)
+        assert_eq!(parsed.chunks[0].len(), 1);
+        assert_eq!(parsed.chunks[0][0].x, 0);
+        assert_eq!(parsed.chunks[0][0].y, 0);
+
+        // chunk 1 must contain (8,0)
+        assert_eq!(parsed.chunks[1].len(), 1);
+        assert_eq!(parsed.chunks[1][0].x, 8);
+        assert_eq!(parsed.chunks[1][0].y, 0);
+
+        // chunk 32 (one full row down) must contain (0,4)
+        let idx_row1_col0 = CHUNK_COLS as usize; // 32
+        assert_eq!(parsed.chunks[idx_row1_col0].len(), 1);
+        assert_eq!(parsed.chunks[idx_row1_col0][0].x, 0);
+        assert_eq!(parsed.chunks[idx_row1_col0][0].y, 4);
     }
 }
