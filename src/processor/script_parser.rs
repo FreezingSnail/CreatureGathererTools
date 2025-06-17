@@ -1,14 +1,4 @@
 //! Parser that consumes the lexer and builds a `Script` AST.
-//!
-//! Supported commands (first slice):
-//!   msg     <tile:u8>                 {text}
-//!   tmsg    @loc1  @loc2               {text}
-//!   tp      x1 y1 x2 y2
-//!   tp      @loc1  @loc2
-//!   setflag    flag_<n>
-//!   unsetflag  flag_<n>
-//!   readflag   flag_<n>
-//!   end
 
 use crate::model::{
     CHUNK_COLS, CHUNK_H, CHUNK_W, ParsedScripts, Script, ScriptLayer, TOTAL_CHUNKS,
@@ -18,14 +8,18 @@ use super::ast::*;
 use super::lexer::{Lexer, Token};
 use std::collections::HashMap;
 
-pub fn parse_scripts(scripts: ScriptLayer) -> Result<ParsedScripts, String> {
+pub fn parse_scripts(scripts: &ScriptLayer) -> Result<ParsedScripts, String> {
     let mut chunks: Vec<Vec<Script>> = vec![Vec::new(); TOTAL_CHUNKS];
 
     let mut controller = Controller::new();
 
-    for script in scripts.objects {
+    for script in &scripts.objects {
         let mut p = Parser::new(&script.script, controller);
-        let cmds = p.parse()?;
+        let parse_res = p.parse();
+        let cmds = match parse_res {
+            Ok(cmds) => cmds,
+            Err(e) => return Err(format!("id {} failed: {}", script.id, e)),
+        };
         let x_i = script.x as i32;
         let y_i = script.y as i32;
         let s = Script {
@@ -56,11 +50,11 @@ fn chunk_index(x: i32, y: i32) -> usize {
     (cy * CHUNK_COLS + cx) as usize // row-major (0‥2047)
 }
 struct Controller {
-    tags: HashMap<String, u8>,
-    flags: HashMap<String, u8>,
+    tags: HashMap<String, u16>,
+    flags: HashMap<String, u16>,
     text: HashMap<String, u16>,
-    tag_count: u8,
-    flag_count: u8,
+    tag_count: u16,
+    flag_count: u16,
     text_count: u16,
 }
 impl Controller {
@@ -75,7 +69,7 @@ impl Controller {
         }
     }
 
-    fn insert_tag(&mut self, tag: &String) -> u8 {
+    fn insert_tag(&mut self, tag: &String) -> u16 {
         if !self.tags.contains_key(tag) {
             self.tags.insert(tag.clone(), self.tag_count);
             self.tag_count += 1;
@@ -83,7 +77,7 @@ impl Controller {
         let v = self.tags.get(tag).unwrap();
         *v
     }
-    fn insert_flag(&mut self, flag: &String) -> u8 {
+    fn insert_flag(&mut self, flag: &String) -> u16 {
         if !self.flags.contains_key(flag) {
             self.flags.insert(flag.clone(), self.flag_count);
             self.flag_count += 1;
@@ -128,7 +122,10 @@ impl<'a> Parser<'a> {
             Some(token) => token,
             None => return Err(format!("unexpected end of script")),
         };
-        let token = token_res.unwrap();
+        let token = match token_res {
+            Ok(t) => t,
+            Err(e) => return Err(format!("parse: {e}")),
+        };
         let cmd = match token {
             Token::Ident(ident) => match ident.as_str() {
                 "msg" => self.parse_msg()?,
@@ -516,6 +513,7 @@ mod tests {
     fn test_collects_tags_and_flags() {
         let script = "if flag_A then setflag flag_B else unsetflag flag_C endif;";
         let script_entry = ScriptEntry {
+            id: 0,
             script: script.to_string(),
             x: 0 as f32,
             y: 0 as f32,
@@ -524,7 +522,7 @@ mod tests {
         let script_layer = ScriptLayer {
             objects: vec![script_entry],
         };
-        let parsed_scripts = parse_scripts(script_layer).unwrap();
+        let parsed_scripts = parse_scripts(&script_layer).unwrap();
         assert_eq!(parsed_scripts.tags.len(), 0);
         assert_eq!(parsed_scripts.flags.len(), 3);
     }
@@ -546,16 +544,19 @@ mod tests {
         //
         let scripts = vec![
             ScriptEntry {
+                id: 0,
                 script: "msg {a};".into(),
                 x: 0.0,
                 y: 0.0, //  chunk 0
             },
             ScriptEntry {
+                id: 0,
                 script: "msg {b};".into(),
                 x: 8.0,
                 y: 0.0, //  chunk 1
             },
             ScriptEntry {
+                id: 0,
                 script: "msg {c};".into(),
                 x: 0.0,
                 y: 4.0, //  first row below → chunk 32
@@ -563,7 +564,7 @@ mod tests {
         ];
 
         let layer = ScriptLayer { objects: scripts };
-        let parsed = parse_scripts(layer).expect("scripts parsed");
+        let parsed = parse_scripts(&layer).expect("scripts parsed");
 
         // chunk 0 must contain (0,0)
         assert_eq!(parsed.chunks[0].len(), 1);

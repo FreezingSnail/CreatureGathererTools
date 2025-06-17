@@ -56,10 +56,6 @@ pub fn assemble_scripts(parsed_scripts: &ParsedScripts) -> Result<ProcessedScrip
     })
 }
 
-/* ------------------------------------------------------------------------- */
-/*  Unit-tests                                                               */
-/* ------------------------------------------------------------------------- */
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -68,17 +64,10 @@ mod tests {
 
     /// Helper: parse a layer and immediately assemble it.
     fn pipe(layer: ScriptLayer) -> (ParsedScripts, ProcessedScripts) {
-        let parsed = parse_scripts(layer).expect("parser ok");
+        let parsed = parse_scripts(&layer).expect("parser ok");
         let processed = assemble_scripts(&parsed).expect("assembler ok");
         (parsed, processed)
     }
-
-    // ──────────────────────────────────────────────────────────────────
-    //  Multiple scripts inside one chunk (chunk #0)
-    // ──────────────────────────────────────────────────────────────────
-    //
-    // (Originally added in an earlier step; kept here unchanged to make
-    //  sure the new per-chunk buffering still produces identical output.)
 
     #[test]
     fn test_assemble_multiple_scripts_same_chunk() {
@@ -86,11 +75,13 @@ mod tests {
         let layer = ScriptLayer {
             objects: vec![
                 ScriptEntry {
+                    id: 0,
                     script: "msg {a};".into(),
                     x: 1.0,
                     y: 1.0, // inside chunk 0
                 },
                 ScriptEntry {
+                    id: 0,
                     script: "msg {b};".into(),
                     x: 2.0,
                     y: 1.0, // same chunk 0
@@ -131,6 +122,7 @@ mod tests {
         let mut scripts = Vec::<ScriptEntry>::new();
         for _ in 0..129 {
             scripts.push(ScriptEntry {
+                id: 0,
                 script: "msg {x};".into(),
                 x: 0.0,
                 y: 0.0, // all go into chunk 0
@@ -138,7 +130,7 @@ mod tests {
         }
         let layer = ScriptLayer { objects: scripts };
 
-        let parsed = parse_scripts(layer).expect("parse ok");
+        let parsed = parse_scripts(&layer).expect("parse ok");
         let err = assemble_scripts(&parsed).unwrap_err();
 
         assert!(

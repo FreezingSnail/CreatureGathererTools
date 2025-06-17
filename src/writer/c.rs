@@ -1,13 +1,20 @@
 //! Emit C++ header/source for the VM part without using external crates.
-
 use crate::model::ProcessedProject;
 use crate::processor::ast::Cmd;
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, Write};
 use std::path::Path;
 
 pub fn emit(project: &ProcessedProject, out_dir: &Path) -> io::Result<()> {
-    let mut h = File::create(out_dir.join(format!("{}_scripts.h", "world")))?;
+    opcode_header(out_dir)?;
+    flags(&project.flags, out_dir)?;
+    locations(&project.locations, out_dir)?;
+    Ok(())
+}
+
+fn opcode_header(out_dir: &Path) -> io::Result<()> {
+    let mut h = File::create(out_dir.join("opcodes.h"))?;
 
     writeln!(h, "#pragma once")?;
     writeln!(h, "#include <cstdint>")?;
@@ -22,11 +29,50 @@ pub fn emit(project: &ProcessedProject, out_dir: &Path) -> io::Result<()> {
     }
     writeln!(h, "}};\n")?;
 
-    // ---------------------------------------------------------------
-    // 2. Script blob & size symbols
-    // ---------------------------------------------------------------
-    writeln!(h, "extern const uint8_t  {n}_scripts_bin[];", n = "world")?;
-    writeln!(h, "extern const uint32_t {n}_scripts_size;", n = "world")?;
+    Ok(())
+}
+
+fn flags(flags: &HashMap<String, u16>, out_dir: &Path) -> io::Result<()> {
+    flag_bit_arr(flags, out_dir)?;
+    flag_names(flags, out_dir)?;
+
+    Ok(())
+}
+
+fn flag_bit_arr(flags: &HashMap<String, u16>, out_dir: &Path) -> io::Result<()> {
+    let mut h = File::create(out_dir.join("flag_bit_array.h"))?;
+    let bits = flags.len() as u16;
+    let bytes = bits / 8 + (bits % 8) as u16;
+
+    writeln!(h, "#pragma once")?;
+    writeln!(h, "#include <cstdint>")?;
+    writeln!(h, "// Auto-generated – DO NOT EDIT\n")?;
+    writeln!(h, "const uint8_t FLAG_BIT_ARRAY[{}];", bytes)?;
+
+    Ok(())
+}
+
+fn flag_names(flags: &HashMap<String, u16>, out_dir: &Path) -> io::Result<()> {
+    let mut h = File::create(out_dir.join("flags.h"))?;
+    writeln!(h, "#pragma once")?;
+    writeln!(h, "#include <cstdint>")?;
+    writeln!(h, "// Auto-generated – DO NOT EDIT\n")?;
+
+    for (name, i) in flags {
+        writeln!(h, "constexpr uint16_t {name} = {};", i)?;
+    }
+
+    Ok(())
+}
+
+fn locations(locs: &HashMap<String, u16>, out_dir: &Path) -> io::Result<()> {
+    let mut h = File::create(out_dir.join("locations.h"))?;
+    writeln!(h, "#pragma once")?;
+    writeln!(h, "#include <cstdint>")?;
+    writeln!(h, "// Auto-generated – DO NOT EDIT\n")?;
+    for (name, i) in locs {
+        writeln!(h, "constexpr uint16_t {name} = {i};")?;
+    }
 
     Ok(())
 }

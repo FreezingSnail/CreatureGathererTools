@@ -283,7 +283,7 @@
                         {
                          "name":"script",
                          "type":"string",
-                         "value":"tp @test_teleport @test_house"
+                         "value":"tp @test_teleport @test_house;"
                         }],
                  "rotation":0,
                  "type":"",
@@ -301,7 +301,7 @@
                         {
                          "name":"script",
                          "type":"string",
-                         "value":"tp @test_house @test_teleport"
+                         "value":"tp @test_house @test_teleport;"
                         }],
                  "rotation":0,
                  "type":"",

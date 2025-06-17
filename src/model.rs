@@ -26,8 +26,8 @@ pub struct ParsedScripts {
     /// to that chunk – vector length is always `TOTAL_CHUNKS`.
     pub chunks: Vec<Vec<Script>>,
 
-    pub tags: HashMap<String, u8>,
-    pub flags: HashMap<String, u8>,
+    pub tags: HashMap<String, u16>,
+    pub flags: HashMap<String, u16>,
     pub texts: HashMap<String, u16>,
 }
 
@@ -55,6 +55,7 @@ pub struct MapLayer {
 /// Only the 3 fields required by the compiler/VM are kept.
 #[derive(Debug, Clone)]
 pub struct ScriptEntry {
+    pub id: i32,
     pub script: String,
     pub x: f32,
     pub y: f32,
@@ -83,4 +84,7 @@ pub struct RawProject {
 use crate::processor::vm;
 pub struct ProcessedProject {
     pub vm: vm::ProcessedScripts,
+    pub flags: HashMap<String, u16>,
+    pub locations: HashMap<String, u16>,
+    pub texts: HashMap<String, u16>,
 }
