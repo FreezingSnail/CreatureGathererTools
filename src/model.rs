@@ -83,7 +83,7 @@ pub struct RawProject {
 /// (Will contain map, tiles, etc. later; right now only the VM part.)
 use crate::processor::blob;
 pub struct ProcessedProject {
-    pub vm: blob::ProcessedScripts,
+    pub blob: blob::ProcessedScripts,
     pub flags: HashMap<String, u16>,
     pub locations: HashMap<String, u16>,
     pub texts: HashMap<String, u16>,

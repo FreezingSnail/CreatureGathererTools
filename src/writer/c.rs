@@ -10,6 +10,7 @@ pub fn emit(project: &ProcessedProject, out_dir: &Path) -> io::Result<()> {
     opcode_header(out_dir)?;
     flags(&project.flags, out_dir)?;
     locations(&project.locations, out_dir)?;
+    //   scripts(&project.blob, out_dir)?;
     Ok(())
 }
 
@@ -35,7 +36,6 @@ fn opcode_header(out_dir: &Path) -> io::Result<()> {
 fn flags(flags: &HashMap<String, u16>, out_dir: &Path) -> io::Result<()> {
     flag_bit_arr(flags, out_dir)?;
     flag_names(flags, out_dir)?;
-
     Ok(())
 }
 
@@ -59,7 +59,7 @@ fn flag_names(flags: &HashMap<String, u16>, out_dir: &Path) -> io::Result<()> {
     writeln!(h, "// Auto-generated – DO NOT EDIT\n")?;
 
     for (name, i) in flags {
-        writeln!(h, "constexpr uint16_t {name} = {};", i)?;
+        writeln!(h, "constexpr uint16_t {name} = {i};")?;
     }
 
     Ok(())
@@ -76,3 +76,16 @@ fn locations(locs: &HashMap<String, u16>, out_dir: &Path) -> io::Result<()> {
 
     Ok(())
 }
+
+// fn scripts(blob: &ProcessedScripts, out_dir: &Path) -> io::Result<()> {
+//     let mut h = File::create(out_dir.join("script_offsets.h"))?;
+//     writeln!(h, "#pragma once")?;
+//     writeln!(h, "#include <cstdint>")?;
+//     writeln!(h, "// Auto-generated – DO NOT EDIT\n")?;
+//     let mut i = 0;
+//     for offset in &blob.offsets {
+//         writeln!(h, "constexpr uint16_t chunk_{i} = {offset};")?;
+//         i += 1;
+//     }
+//     Ok(())
+// }
