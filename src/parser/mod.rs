@@ -1,7 +1,3 @@
-//! Public façade for JSON → RawProject parsing.
-
-use std::fs;
-
 use anyhow::{Result, anyhow};
 use serde_json::Value;
 
