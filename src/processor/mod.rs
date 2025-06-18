@@ -2,16 +2,13 @@
 //!
 //! For the moment we only care about assembling scripts into byte-code.
 pub mod ast;
+pub mod blob;
 pub mod lexer;
 pub mod script_parser;
-pub mod vm;
 
 pub use crate::model::Script;
 
-use crate::{
-    model::{ProcessedProject, RawProject},
-    processor::script_parser::parse_scripts,
-};
+use crate::model::{ProcessedProject, RawProject};
 use anyhow::Result;
 
 /// Runs every processing pass and returns a read-only structure for writers.
@@ -23,7 +20,7 @@ pub fn run(raw: &RawProject) -> Result<ProcessedProject> {
             panic!("Error parsing scripts: {}", e);
         }
     };
-    let vm_scripts = vm::assemble_scripts(&processed)?;
+    let vm_scripts = blob::assemble_scripts(&processed)?;
 
     Ok(ProcessedProject {
         vm: vm_scripts,

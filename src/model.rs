@@ -81,9 +81,9 @@ pub struct RawProject {
 
 /// Fully processed output handed to `writer`.
 /// (Will contain map, tiles, etc. later; right now only the VM part.)
-use crate::processor::vm;
+use crate::processor::blob;
 pub struct ProcessedProject {
-    pub vm: vm::ProcessedScripts,
+    pub vm: blob::ProcessedScripts,
     pub flags: HashMap<String, u16>,
     pub locations: HashMap<String, u16>,
     pub texts: HashMap<String, u16>,
