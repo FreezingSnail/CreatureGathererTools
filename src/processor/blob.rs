@@ -9,14 +9,13 @@ use crate::processor::ast::ToBytecode; // bring the trait into scope
 
 #[derive(Debug)]
 pub struct ProcessedScripts {
-    pub blob: Vec<u8>,     // concatenated bytecode for all scripts
-    pub offsets: Vec<u16>, // starting offset of each script
-    pub names: Vec<String>,
+    pub blob: Vec<Vec<u8>>, // concatenated bytecode for all scripts
+    pub offsets: Vec<u16>,  // starting offset of each script
 }
 
 /// Convert every raw script into “bytecode”.
 pub fn assemble_scripts(parsed_scripts: &ParsedScripts) -> Result<ProcessedScripts> {
-    let mut blob = Vec::<u8>::new(); // final buffer (all chunks)
+    let mut blob = Vec::<Vec<u8>>::new(); // final buffer (all chunks)
     let mut offsets = Vec::<u16>::new(); // absolute offsets into `blob`
 
     // Iterate over map-chunks (0‥2047)
@@ -37,23 +36,19 @@ pub fn assemble_scripts(parsed_scripts: &ParsedScripts) -> Result<ProcessedScrip
         }
 
         // ------- size check ----------------------------------------------
-        if tmp.len() > 512 {
+        if tmp.len() > 128 {
             return Err(anyhow!(
-                "chunk {} too large, {} bytes instead of 512",
+                "chunk {} too large, {} bytes instead of 128",
                 chunk_idx,
                 tmp.len()
             ));
         }
 
         // append verified chunk to the final blob
-        blob.extend_from_slice(&tmp);
+        blob.push(tmp);
     }
 
-    Ok(ProcessedScripts {
-        blob,
-        offsets,
-        names: Vec::<String>::new(),
-    })
+    Ok(ProcessedScripts { blob, offsets })
 }
 
 #[cfg(test)]
@@ -99,11 +94,16 @@ mod tests {
         // → 4 bytes per command
         assert_eq!(processed.offsets, vec![0u16, 4u16]);
 
-        // Blob must be:
-        //  [0, 0, 0, 0]   Msg opcode(0) + text-idx 0 + terminator
-        //  [0, 1, 0, 0]   Msg opcode(0) + text-idx 1 + terminator
+        // Blob must be a Vec<Vec<u8>> with one chunk containing both scripts
+        // Chunk 0: [0, 0, 0, 0, 0, 1, 0, 0]
+        //          [Msg opcode(0) + text-idx 0 + terminator, Msg opcode(0) + text-idx 1 + terminator]
         assert_eq!(
-            processed.blob,
+            processed.blob.len(),
+            1,
+            "should have exactly 1 non-empty chunk"
+        );
+        assert_eq!(
+            processed.blob[0],
             vec![
                 0, 0, 0, 0, // first  script
                 0, 1, 0, 0 // second script

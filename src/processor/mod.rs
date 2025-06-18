@@ -23,7 +23,7 @@ pub fn run(raw: &RawProject) -> Result<ProcessedProject> {
     let vm_scripts = blob::assemble_scripts(&processed)?;
 
     Ok(ProcessedProject {
-        vm: vm_scripts,
+        blob: vm_scripts,
         flags: processed.flags,
         locations: processed.tags,
         texts: processed.texts,
