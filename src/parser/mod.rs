@@ -1,7 +1,9 @@
 use anyhow::{Result, anyhow};
 use serde_json::Value;
 
-use crate::model::{LocationLayer, MapLayer, RawProject, RawTiled, ScriptEntry, ScriptLayer};
+use crate::model::{
+    LocationEntry, LocationLayer, MapLayer, RawProject, RawTiled, ScriptEntry, ScriptLayer,
+};
 
 /// Parse the whole input JSON string into `RawProject`.
 ///
@@ -55,7 +57,7 @@ pub fn load_from_json(json: &str) -> Result<RawTiled> {
                 println!("Scripts layer parsed");
             }
             "locations" => {
-                locations = Some(serde_json::from_value(layer_val.clone())?);
+                locations = Some(parse_location_layer(layer_val)?);
                 println!("Locations layer parsed");
             }
             other => return Err(anyhow!("unknown layer `{other}`")),
@@ -145,8 +147,61 @@ fn parse_script_layer(layer: &Value) -> Result<ScriptLayer> {
     Ok(ScriptLayer { objects: entries })
 }
 
+fn parse_location_layer(layer: &Value) -> Result<LocationLayer> {
+    let obj_arr = layer
+        .get("objects")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| anyhow!("`script` layer has no `objects` array"))?;
+
+    println!("Found {} script objects", obj_arr.len());
+
+    let mut entries = Vec::<LocationEntry>::with_capacity(obj_arr.len());
+
+    for (i, obj) in obj_arr.iter().enumerate() {
+        if i % 100 == 0 {
+            println!(
+                "Processing script object {}/{}: {:?}",
+                i,
+                obj_arr.len(),
+                obj
+            );
+        }
+
+        let x = obj
+            .get("x")
+            .and_then(|v| v.as_f64())
+            .ok_or_else(|| anyhow!("object {} missing `x`", i))? as f32;
+
+        let y = obj
+            .get("y")
+            .and_then(|v| v.as_f64())
+            .ok_or_else(|| anyhow!("object {} missing `y`", i))? as f32;
+
+        let id = obj
+            .get("id")
+            .and_then(|v| v.as_f64())
+            .ok_or_else(|| anyhow!("object {} missing `id`", i))? as i32;
+
+        let name = obj
+            .get("name")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow!("object {} missing `name`", i))?;
+
+        entries.push(LocationEntry {
+            id,
+            name: name.to_string(),
+            x,
+            y,
+        });
+    }
+
+    println!("Successfully parsed {} script entries", entries.len());
+    Ok(LocationLayer { objects: entries })
+}
+
 pub fn tiled_to_raw(tiled: &RawTiled) -> RawProject {
     RawProject {
         scripts: tiled.scripts.clone(),
+        locations: tiled.locations.clone(),
     }
 }

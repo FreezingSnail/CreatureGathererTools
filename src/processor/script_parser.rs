@@ -6,30 +6,45 @@ use crate::model::{
 
 use super::ast::*;
 use super::lexer::{Lexer, Token};
+use super::locations_parser::LocationTags;
 use std::collections::HashMap;
 
-pub fn parse_scripts(scripts: &ScriptLayer) -> Result<ParsedScripts, String> {
+pub fn parse_scripts(
+    scripts: &ScriptLayer,
+    loc_tags: &LocationTags,
+) -> Result<ParsedScripts, String> {
     let mut chunks: Vec<Vec<Script>> = vec![Vec::new(); TOTAL_CHUNKS];
 
     let mut controller = Controller::new();
 
     for script in &scripts.objects {
-        let mut p = Parser::new(&script.script, controller);
+        let mut p = Parser::new(&script.script, controller, loc_tags.clone());
         let parse_res = p.parse();
         let cmds = match parse_res {
             Ok(cmds) => cmds,
             Err(e) => return Err(format!("id {} failed: {}", script.id, e)),
         };
-        let x_i = script.x as i32;
-        let y_i = script.y as i32;
+        let x_i = script.x as i32 / 16;
+        let y_i = script.y as i32 / 16;
         let s = Script {
+            script: script.script.clone(),
             body: cmds,
             x: x_i,
             y: y_i,
         };
 
         let idx = chunk_index(x_i, y_i);
-        chunks[idx].push(s.clone());
+        if !s.body.is_empty() {
+            println!(
+                "id {} has {} commands for index {} at {},{}",
+                script.id,
+                s.body.len(),
+                idx,
+                x_i,
+                y_i
+            );
+            chunks[idx].push(s.clone());
+        }
 
         controller = p.controller;
     }
@@ -45,8 +60,8 @@ pub fn parse_scripts(scripts: &ScriptLayer) -> Result<ParsedScripts, String> {
 /// Convert map-coordinates into the linear chunk index (0‥2047).
 #[inline]
 fn chunk_index(x: i32, y: i32) -> usize {
-    let cx = x / CHUNK_W; // 0‥31
-    let cy = y / CHUNK_H; // 0‥63
+    let cx = x / CHUNK_W; // 0‥31 (which 8-wide column)
+    let cy = y / CHUNK_H; // 0‥63 (which 4-tall row)
     (cy * CHUNK_COLS + cx) as usize // row-major (0‥2047)
 }
 struct Controller {
@@ -100,12 +115,17 @@ impl Controller {
 struct Parser<'a> {
     lex: std::iter::Peekable<Lexer<'a>>,
     controller: Controller,
+    locations: LocationTags,
 }
 
 impl<'a> Parser<'a> {
-    fn new(src: &'a str, controller: Controller) -> Self {
+    fn new(src: &'a str, controller: Controller, locations: LocationTags) -> Self {
         let lex = Lexer::new(src).peekable();
-        Self { lex, controller }
+        Self {
+            lex,
+            controller,
+            locations,
+        }
     }
     fn parse(&mut self) -> Result<Vec<Cmd>, String> {
         let mut res = Vec::<Cmd>::new();
@@ -235,11 +255,13 @@ impl<'a> Parser<'a> {
 
         match next_token {
             Token::At(at) => {
-                let i = self.controller.insert_tag(&at);
-                Ok(Location::Tag(Text {
-                    text: at,
-                    index: i as u16,
-                }))
+                self.controller.insert_tag(&at);
+                let res = self.locations.get(&at);
+                let cords = match res {
+                    Some(cords) => cords,
+                    None => return Err(format!("location {} not found!", at)),
+                };
+                Ok(Location::Cords(cords.0, cords.1))
             }
             Token::Number(n1) => {
                 let n2 = match self
@@ -356,7 +378,7 @@ mod tests {
         )];
 
         for (input, expected) in test_cases {
-            let mut parser = Parser::new(input, Controller::new());
+            let mut parser = Parser::new(input, Controller::new(), HashMap::new());
             let result = parser.parse_cmd();
             assert_eq!(result, expected);
         }
@@ -364,13 +386,13 @@ mod tests {
 
     #[test]
     fn test_parse_tmsg() {
+        let mut locations = LocationTags::new();
+        locations.insert("testLoc".into(), (1, 1));
+        locations.insert("loc2".into(), (2, 2));
         let test_cases = vec![(
             "tmsg @testLoc {hello world};",
             Ok(Cmd::TMsg {
-                at: Location::Tag(Text {
-                    text: "testLoc".into(),
-                    index: 0,
-                }),
+                at: Location::Cords(1, 1),
                 text: Text {
                     text: "hello world".into(),
                     index: 0,
@@ -379,34 +401,28 @@ mod tests {
         )];
 
         for (input, expected) in test_cases {
-            let mut parser = Parser::new(input, Controller::new());
+            let mut parser = Parser::new(input, Controller::new(), locations.clone());
             let result = parser.parse_cmd();
             assert_eq!(result, expected);
         }
     }
     #[test]
     fn test_parse_tp() {
+        let mut locations = LocationTags::new();
+        locations.insert("loc1".into(), (1, 1));
+        locations.insert("loc2".into(), (2, 2));
         let test_cases = vec![
             (
                 "tp @loc1 @loc2;",
                 Ok(Cmd::Tp {
-                    from: Location::Tag(Text {
-                        text: "loc1".into(),
-                        index: 0,
-                    }),
-                    to: Location::Tag(Text {
-                        text: "loc2".into(),
-                        index: 1,
-                    }),
+                    from: Location::Cords(1, 1),
+                    to: Location::Cords(2, 2),
                 }),
             ),
             (
                 "tp @loc1 1 2;",
                 Ok(Cmd::Tp {
-                    from: Location::Tag(Text {
-                        text: "loc1".into(),
-                        index: 0,
-                    }),
+                    from: Location::Cords(1, 1),
                     to: Location::Cords(1, 2),
                 }),
             ),
@@ -414,10 +430,7 @@ mod tests {
                 "tp 1 2 @loc1;",
                 Ok(Cmd::Tp {
                     from: Location::Cords(1, 2),
-                    to: Location::Tag(Text {
-                        text: "loc1".into(),
-                        index: 0,
-                    }),
+                    to: Location::Cords(1, 1),
                 }),
             ),
             (
@@ -430,7 +443,7 @@ mod tests {
         ];
 
         for (input, expected) in test_cases {
-            let mut parser = Parser::new(input, Controller::new());
+            let mut parser = Parser::new(input, Controller::new(), locations.clone());
             let result = parser.parse_cmd();
             assert_eq!(result, expected);
         }
@@ -503,7 +516,7 @@ mod tests {
         for (input, expected) in test_cases {
             println!("Testing: {input}");
 
-            let mut parser = Parser::new(input, Controller::new());
+            let mut parser = Parser::new(input, Controller::new(), HashMap::new());
             let result = parser.parse_cmd();
             assert_eq!(result, expected);
         }
@@ -522,7 +535,7 @@ mod tests {
         let script_layer = ScriptLayer {
             objects: vec![script_entry],
         };
-        let parsed_scripts = parse_scripts(&script_layer).unwrap();
+        let parsed_scripts = parse_scripts(&script_layer, &HashMap::new()).unwrap();
         assert_eq!(parsed_scripts.tags.len(), 0);
         assert_eq!(parsed_scripts.flags.len(), 3);
     }
@@ -552,33 +565,33 @@ mod tests {
             ScriptEntry {
                 id: 0,
                 script: "msg {b};".into(),
-                x: 8.0,
+                x: 8.0 * 16 as f32,
                 y: 0.0, //  chunk 1
             },
             ScriptEntry {
                 id: 0,
                 script: "msg {c};".into(),
                 x: 0.0,
-                y: 4.0, //  first row below → chunk 32
+                y: 4.0 * 16 as f32, //  first row below → chunk 32
             },
         ];
 
         let layer = ScriptLayer { objects: scripts };
-        let parsed = parse_scripts(&layer).expect("scripts parsed");
+        let parsed = parse_scripts(&layer, &HashMap::new()).expect("scripts parsed");
 
         // chunk 0 must contain (0,0)
-        assert_eq!(parsed.chunks[0].len(), 1);
+        assert_eq!(parsed.chunks[0].len(), 1, "chunk 0 scripts");
         assert_eq!(parsed.chunks[0][0].x, 0);
         assert_eq!(parsed.chunks[0][0].y, 0);
 
         // chunk 1 must contain (8,0)
-        assert_eq!(parsed.chunks[1].len(), 1);
+        assert_eq!(parsed.chunks[1].len(), 1, "chunk 1 scripts");
         assert_eq!(parsed.chunks[1][0].x, 8);
         assert_eq!(parsed.chunks[1][0].y, 0);
 
         // chunk 32 (one full row down) must contain (0,4)
         let idx_row1_col0 = CHUNK_COLS as usize; // 32
-        assert_eq!(parsed.chunks[idx_row1_col0].len(), 1);
+        assert_eq!(parsed.chunks[idx_row1_col0].len(), 1, "chunk 2 scripts");
         assert_eq!(parsed.chunks[idx_row1_col0][0].x, 0);
         assert_eq!(parsed.chunks[idx_row1_col0][0].y, 4);
     }

@@ -15,6 +15,7 @@ use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct Script {
+    pub script: String,
     pub body: Vec<Cmd>,
     pub x: i32,
     pub y: i32,
@@ -66,17 +67,24 @@ pub struct ScriptEntry {
 pub struct ScriptLayer {
     pub objects: Vec<ScriptEntry>,
 }
+#[derive(Debug, Clone)]
+pub struct LocationEntry {
+    pub id: i32,
+    pub name: String,
+    pub x: f32,
+    pub y: f32,
+}
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct LocationLayer {
-    #[serde(flatten)]
-    pub raw: serde_json::Value,
+    pub objects: Vec<LocationEntry>,
 }
 
 /// Immediately-after-parse representation (raw, 1-to-1 with JSON).
 #[derive(Debug, Clone)]
 pub struct RawProject {
     pub scripts: ScriptLayer,
+    pub locations: LocationLayer,
 }
 
 /// Fully processed output handed to `writer`.

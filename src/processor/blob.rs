@@ -7,15 +7,21 @@ use anyhow::{Result, anyhow};
 use crate::model::ParsedScripts;
 use crate::processor::ast::ToBytecode; // bring the trait into scope
 
+#[derive(Debug, PartialEq, Eq)]
+
+pub struct ScriptBlob {
+    pub blob: Vec<u8>,
+    pub script: String,
+}
 #[derive(Debug)]
 pub struct ProcessedScripts {
-    pub blob: Vec<Vec<u8>>, // concatenated bytecode for all scripts
-    pub offsets: Vec<u16>,  // starting offset of each script
+    pub blob: Vec<ScriptBlob>, // concatenated bytecode for all scripts
+    pub offsets: Vec<u16>,     // starting offset of each script
 }
 
 /// Convert every raw script into “bytecode”.
 pub fn assemble_scripts(parsed_scripts: &ParsedScripts) -> Result<ProcessedScripts> {
-    let mut blob = Vec::<Vec<u8>>::new(); // final buffer (all chunks)
+    let mut blob = Vec::<ScriptBlob>::new(); // final buffer (all chunks)
     let mut offsets = Vec::<u16>::new(); // absolute offsets into `blob`
 
     // Iterate over map-chunks (0‥2047)
@@ -23,15 +29,17 @@ pub fn assemble_scripts(parsed_scripts: &ParsedScripts) -> Result<ProcessedScrip
         // ------- assemble this chunk into a temporary buffer -------------
         let mut tmp = Vec::<u8>::new();
         let base_offset = blob.len() as u16; // where this chunk will start
-
+        let mut s = String::new();
         for script in chunk {
+            // append the script string to s
+            s += &script.script;
             for cmd in &script.body {
                 // record absolute offset (base + current tmp len)
                 offsets.push(base_offset + tmp.len() as u16);
 
                 // encode command and append stub terminator
                 tmp.extend_from_slice(&cmd.to_bytes());
-                tmp.push(0x00);
+                tmp.push(0xff);
             }
         }
 
@@ -45,7 +53,10 @@ pub fn assemble_scripts(parsed_scripts: &ParsedScripts) -> Result<ProcessedScrip
         }
 
         // append verified chunk to the final blob
-        blob.push(tmp);
+        blob.push(ScriptBlob {
+            blob: tmp.clone(),
+            script: s.clone(),
+        });
     }
 
     Ok(ProcessedScripts { blob, offsets })
@@ -53,13 +64,15 @@ pub fn assemble_scripts(parsed_scripts: &ParsedScripts) -> Result<ProcessedScrip
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use super::*;
     use crate::model::{ScriptEntry, ScriptLayer};
     use crate::processor::script_parser::parse_scripts;
 
     /// Helper: parse a layer and immediately assemble it.
     fn pipe(layer: ScriptLayer) -> (ParsedScripts, ProcessedScripts) {
-        let parsed = parse_scripts(&layer).expect("parser ok");
+        let parsed = parse_scripts(&layer, &HashMap::new()).expect("parser ok");
         let processed = assemble_scripts(&parsed).expect("assembler ok");
         (parsed, processed)
     }
@@ -99,15 +112,18 @@ mod tests {
         //          [Msg opcode(0) + text-idx 0 + terminator, Msg opcode(0) + text-idx 1 + terminator]
         assert_eq!(
             processed.blob.len(),
-            1,
-            "should have exactly 1 non-empty chunk"
+            2048,
+            "should have exactly 2048 chunks"
         );
         assert_eq!(
             processed.blob[0],
-            vec![
-                0, 0, 0, 0, // first  script
-                0, 1, 0, 0 // second script
-            ]
+            ScriptBlob {
+                blob: vec![
+                    0, 0, 0, 0, // first  script
+                    0, 1, 0, 0 // second script
+                ],
+                script: "msg {a};msg {b};".into(),
+            }
         );
     }
 
@@ -130,7 +146,7 @@ mod tests {
         }
         let layer = ScriptLayer { objects: scripts };
 
-        let parsed = parse_scripts(&layer).expect("parse ok");
+        let parsed = parse_scripts(&layer, &HashMap::new()).expect("parse ok");
         let err = assemble_scripts(&parsed).unwrap_err();
 
         assert!(

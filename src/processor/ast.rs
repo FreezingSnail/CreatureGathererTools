@@ -136,14 +136,14 @@ pub trait ToBytecode {
 /* -------- Helper ---------- */
 
 fn write_u16(v: u16, out: &mut Vec<u8>) {
-    out.extend_from_slice(&v.to_le_bytes());
+    out.extend_from_slice(&v.to_be_bytes());
 }
 
 /* -------- Implementations -- */
 
 impl ToBytecode for Text {
     fn to_bytes(&self) -> Vec<u8> {
-        self.index.to_le_bytes().to_vec()
+        self.index.to_be_bytes().to_vec()
     }
 }
 
@@ -152,12 +152,11 @@ impl ToBytecode for Location {
         let mut buf = Vec::new();
         match self {
             Location::Cords(x, y) => {
-                buf.push(0); // variant tag
                 write_u16(*x, &mut buf);
                 write_u16(*y, &mut buf);
             }
             Location::Tag(t) => {
-                buf.push(1);
+                buf.push(255);
                 buf.extend_from_slice(&t.to_bytes());
             }
         }
@@ -301,9 +300,9 @@ mod tests {
             to: Location::Cords(3, 4),
         };
         // opcode 2
-        //  from: 0, 1,0, 2,0
-        //  to  : 0, 3,0, 4,0
-        assert_eq!(cmd.to_bytes(), vec![2, 0, 1, 0, 2, 0, 0, 3, 0, 4, 0]);
+        //  from:  1,0, 2,0
+        //  to  :  3,0, 4,0
+        assert_eq!(cmd.to_bytes(), vec![2, 1, 0, 2, 0, 3, 0, 4, 0]);
     }
 
     #[test]
