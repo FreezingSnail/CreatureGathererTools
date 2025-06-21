@@ -4,6 +4,7 @@
 pub mod ast;
 pub mod blob;
 pub mod lexer;
+pub mod locations_parser;
 pub mod script_parser;
 
 pub use crate::model::Script;
@@ -13,7 +14,8 @@ use anyhow::Result;
 
 /// Runs every processing pass and returns a read-only structure for writers.
 pub fn run(raw: &RawProject) -> Result<ProcessedProject> {
-    let parse_result = script_parser::parse_scripts(&raw.scripts);
+    let locations = locations_parser::parse_locations(&raw.locations);
+    let parse_result = script_parser::parse_scripts(&raw.scripts, &locations);
     let processed = match parse_result {
         Ok(processed) => processed,
         Err(e) => {

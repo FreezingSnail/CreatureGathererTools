@@ -1,6 +1,7 @@
 //! Emit C++ header/source for the VM part without using external crates.
 use crate::model::ProcessedProject;
 use crate::processor::ast::Cmd;
+use crate::processor::blob::ProcessedScripts;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, Write};
@@ -10,7 +11,7 @@ pub fn emit(project: &ProcessedProject, out_dir: &Path) -> io::Result<()> {
     opcode_header(out_dir)?;
     flags(&project.flags, out_dir)?;
     locations(&project.locations, out_dir)?;
-    //   scripts(&project.blob, out_dir)?;
+    scripts(&project.blob, out_dir)?;
     Ok(())
 }
 
@@ -77,15 +78,24 @@ fn locations(locs: &HashMap<String, u16>, out_dir: &Path) -> io::Result<()> {
     Ok(())
 }
 
-// fn scripts(blob: &ProcessedScripts, out_dir: &Path) -> io::Result<()> {
-//     let mut h = File::create(out_dir.join("script_offsets.h"))?;
-//     writeln!(h, "#pragma once")?;
-//     writeln!(h, "#include <cstdint>")?;
-//     writeln!(h, "// Auto-generated – DO NOT EDIT\n")?;
-//     let mut i = 0;
-//     for offset in &blob.offsets {
-//         writeln!(h, "constexpr uint16_t chunk_{i} = {offset};")?;
-//         i += 1;
-//     }
-//     Ok(())
-// }
+fn scripts(blob: &ProcessedScripts, out_dir: &Path) -> io::Result<()> {
+    let mut h = File::create(out_dir.join("scripts.h"))?;
+    writeln!(h, "#pragma once")?;
+    writeln!(h, "#include <cstdint>")?;
+    writeln!(h, "// Auto-generated – DO NOT EDIT\n")?;
+    for (i, blob) in blob.blob.iter().enumerate() {
+        if blob.blob.is_empty() {
+            continue;
+        }
+        let str_nums: Vec<String> = blob
+            .blob
+            .iter()
+            .map(|n| n.to_string()) // Convert each u8 to a string
+            .collect(); // Collect into a Vec<String>
+        let joined = str_nums.join(",");
+        writeln!(h, "// {}", blob.script)?;
+        writeln!(h, "constexpr uint8_t blob{i}[] = {{ {} }};", joined)?;
+    }
+
+    Ok(())
+}

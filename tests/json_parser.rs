@@ -11,7 +11,7 @@ fn parses_script_objects() {
     assert_eq!(proj.scripts.objects.len(), 2);
 
     let first = &proj.scripts.objects[0];
-    assert_eq!(first.script, "tp @test_teleport @test_house");
+    assert_eq!(first.script, "tp @test_teleport @test_house;");
     assert!((first.x - 7.8261).abs() < 1e-3);
     assert!((first.y - 75.3462).abs() < 1e-3);
 }
