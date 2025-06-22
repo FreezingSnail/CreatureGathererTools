@@ -151,6 +151,7 @@ impl<'a> Parser<'a> {
                 "msg" => self.parse_msg()?,
                 "tmsg" => self.parse_tmsg()?,
                 "tp" => self.parse_tp()?,
+                "tpif" => self.parse_tpif()?,
                 "if" => self.parse_if()?,
                 "setflag" | "unsetflag" | "readflag" => self.parse_flag_cmd(ident)?,
 
@@ -186,6 +187,14 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_tp(&mut self) -> Result<Cmd, String> {
+        let to = match self.parse_location() {
+            Err(e) => return Err(e),
+            Ok(loc) => loc,
+        };
+
+        Ok(Cmd::Tp { to })
+    }
+    fn parse_tpif(&mut self) -> Result<Cmd, String> {
         let from = match self.parse_location() {
             Err(e) => return Err(e),
             Ok(loc) => loc,
@@ -413,28 +422,28 @@ mod tests {
         locations.insert("loc2".into(), (2, 2));
         let test_cases = vec![
             (
-                "tp @loc1 @loc2;",
+                "tpif @loc1 @loc2;",
                 Ok(Cmd::TpIf {
                     from: Location::Cords(1, 1),
                     to: Location::Cords(2, 2),
                 }),
             ),
             (
-                "tp @loc1 1 2;",
+                "tpif @loc1 1 2;",
                 Ok(Cmd::TpIf {
                     from: Location::Cords(1, 1),
                     to: Location::Cords(1, 2),
                 }),
             ),
             (
-                "tp 1 2 @loc1;",
+                "tpif 1 2 @loc1;",
                 Ok(Cmd::TpIf {
                     from: Location::Cords(1, 2),
                     to: Location::Cords(1, 1),
                 }),
             ),
             (
-                "tp 256 256 0 0;",
+                "tpif 256 256 0 0;",
                 Ok(Cmd::TpIf {
                     from: Location::Cords(256, 256),
                     to: Location::Cords(0, 0),
@@ -512,15 +521,14 @@ mod tests {
                 }),
             ),
             (
-                "if flag_test1 then tp 1 1 0 0 endif;",
+                "if flag_test1 then tp 1 1 endif;",
                 Ok(Cmd::If {
                     condition: Condition::FlagSet(Text {
                         text: "flag_test1".into(),
                         index: 0,
                     }),
-                    branches: Branch::Then(Box::new(Cmd::TpIf {
-                        from: Location::Cords(1, 1),
-                        to: Location::Cords(0, 0),
+                    branches: Branch::Then(Box::new(Cmd::Tp {
+                        to: Location::Cords(1, 1),
                     })),
                 }),
             ),

@@ -19,13 +19,14 @@ pub struct Text {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Opcode {
     Msg = 0,
-    TMsg = 1,
-    TpIf = 2,
-    If = 3,
-    SetFlag = 4,
-    UnsetFlag = 5,
-    ReadFlag = 6,
-    End = 7,
+    TMsg,
+    Tp,
+    TpIf,
+    If,
+    SetFlag,
+    UnsetFlag,
+    ReadFlag,
+    End = 255,
 }
 
 impl From<Opcode> for u8 {
@@ -71,6 +72,9 @@ pub enum Cmd {
     },
 
     /// `tp …`
+    Tp {
+        to: Location,
+    },
     TpIf {
         from: Location,
         to: Location,
@@ -100,6 +104,7 @@ impl Cmd {
     pub const VARIANT_NAMES: &'static [&'static str] = &[
         "Msg",
         "TMsg",
+        "Tp",
         "TpIf",
         "If",
         "SetFlag",
@@ -114,6 +119,7 @@ impl Cmd {
         match self {
             Cmd::Msg { .. } => Opcode::Msg,
             Cmd::TMsg { .. } => Opcode::TMsg,
+            Cmd::Tp { .. } => Opcode::Tp,
             Cmd::TpIf { .. } => Opcode::TpIf,
             Cmd::If { .. } => Opcode::If,
             Cmd::SetFlag { .. } => Opcode::SetFlag,
@@ -212,6 +218,9 @@ impl ToBytecode for Cmd {
                 buf.extend_from_slice(&at.to_bytes());
                 buf.extend_from_slice(&text.to_bytes());
             }
+            Cmd::Tp { to } => {
+                buf.extend_from_slice(&to.to_bytes());
+            }
             Cmd::TpIf { from, to } => {
                 buf.extend_from_slice(&from.to_bytes());
                 buf.extend_from_slice(&to.to_bytes());
@@ -302,7 +311,10 @@ mod tests {
         // opcode 2
         //  from:  1,0, 2,0
         //  to  :  3,0, 4,0
-        assert_eq!(cmd.to_bytes(), vec![2, 0, 1, 0, 2, 0, 3, 0, 4]);
+        assert_eq!(
+            cmd.to_bytes(),
+            vec![Opcode::TpIf as u8, 0, 1, 0, 2, 0, 3, 0, 4]
+        );
     }
 
     #[test]
@@ -310,6 +322,6 @@ mod tests {
         let cmd = Cmd::SetFlag {
             flag: txt(5, "flag"),
         };
-        assert_eq!(cmd.to_bytes(), vec![4, 0, 5]); // opcode 4
+        assert_eq!(cmd.to_bytes(), vec![Opcode::SetFlag as u8, 0, 5]); // opcode 4
     }
 }

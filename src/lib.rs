@@ -22,7 +22,9 @@ pub fn run() -> anyhow::Result<()> {
     std::fs::create_dir_all(&args.output)
         .with_context(|| format!("Creating {}", args.output.display()))?;
 
+    println!("Writing C headers");
     writer::c::emit(&processed, &args.output).with_context(|| "Writing C artifacts")?;
+    println!("Writing binary artifacts");
     writer::bin::emit(&processed, &args.output).with_context(|| "Writing binary artifacts")?;
 
     Ok(())
