@@ -84,7 +84,7 @@ fn scripts(blob: &ProcessedScripts, out_dir: &Path) -> io::Result<()> {
     writeln!(h, "#include <cstdint>")?;
     writeln!(h, "// Auto-generated – DO NOT EDIT\n")?;
     for (i, blob) in blob.blob.iter().enumerate() {
-        if blob.blob.is_empty() {
+        if blob.blob.len() <= 1 {
             continue;
         }
         let str_nums: Vec<String> = blob

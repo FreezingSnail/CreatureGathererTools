@@ -20,7 +20,7 @@ pub struct Text {
 pub enum Opcode {
     Msg = 0,
     TMsg = 1,
-    Tp = 2,
+    TpIf = 2,
     If = 3,
     SetFlag = 4,
     UnsetFlag = 5,
@@ -71,7 +71,7 @@ pub enum Cmd {
     },
 
     /// `tp …`
-    Tp {
+    TpIf {
         from: Location,
         to: Location,
     },
@@ -100,7 +100,7 @@ impl Cmd {
     pub const VARIANT_NAMES: &'static [&'static str] = &[
         "Msg",
         "TMsg",
-        "Tp",
+        "TpIf",
         "If",
         "SetFlag",
         "UnsetFlag",
@@ -114,7 +114,7 @@ impl Cmd {
         match self {
             Cmd::Msg { .. } => Opcode::Msg,
             Cmd::TMsg { .. } => Opcode::TMsg,
-            Cmd::Tp { .. } => Opcode::Tp,
+            Cmd::TpIf { .. } => Opcode::TpIf,
             Cmd::If { .. } => Opcode::If,
             Cmd::SetFlag { .. } => Opcode::SetFlag,
             Cmd::UnsetFlag { .. } => Opcode::UnsetFlag,
@@ -212,7 +212,7 @@ impl ToBytecode for Cmd {
                 buf.extend_from_slice(&at.to_bytes());
                 buf.extend_from_slice(&text.to_bytes());
             }
-            Cmd::Tp { from, to } => {
+            Cmd::TpIf { from, to } => {
                 buf.extend_from_slice(&from.to_bytes());
                 buf.extend_from_slice(&to.to_bytes());
             }
@@ -258,18 +258,18 @@ mod tests {
     #[test]
     fn test_text_to_bytes() {
         let t = txt(0x1224, "dummy");
-        assert_eq!(t.to_bytes(), vec![0x24, 0x12]); // little-endian
+        assert_eq!(t.to_bytes(), vec![0x12, 0x24]); // little-endian
     }
 
     #[test]
     fn test_location_to_bytes() {
         // Cords
         let loc = Location::Cords(1, 2);
-        assert_eq!(loc.to_bytes(), vec![0, 1, 0, 2, 0]);
+        assert_eq!(loc.to_bytes(), vec![0, 1, 0, 2]);
 
         // Tag
         let loc = Location::Tag(txt(7, "tag"));
-        assert_eq!(loc.to_bytes(), vec![1, 7, 0]);
+        assert_eq!(loc.to_bytes(), vec![255, 0, 7]);
     }
 
     // ──────────────────────────────────────────────────────────────────────
@@ -280,7 +280,7 @@ mod tests {
     fn test_cmd_msg() {
         let cmd = Cmd::Msg { text: txt(3, "hi") };
         // opcode 0 (Msg) + text-index 3 (u16 LE)
-        assert_eq!(cmd.to_bytes(), vec![0, 3, 0]);
+        assert_eq!(cmd.to_bytes(), vec![0, 0, 3]);
     }
 
     #[test]
@@ -290,19 +290,19 @@ mod tests {
             text: txt(2, "hello"),
         };
         // opcode 1  | Location(Tag) => 1, idx 1  | text-idx 2
-        assert_eq!(cmd.to_bytes(), vec![1, 1, 1, 0, 2, 0]);
+        assert_eq!(cmd.to_bytes(), vec![1, 255, 0, 1, 0, 2]);
     }
 
     #[test]
     fn test_cmd_tp_cords() {
-        let cmd = Cmd::Tp {
+        let cmd = Cmd::TpIf {
             from: Location::Cords(1, 2),
             to: Location::Cords(3, 4),
         };
         // opcode 2
         //  from:  1,0, 2,0
         //  to  :  3,0, 4,0
-        assert_eq!(cmd.to_bytes(), vec![2, 1, 0, 2, 0, 3, 0, 4, 0]);
+        assert_eq!(cmd.to_bytes(), vec![2, 0, 1, 0, 2, 0, 3, 0, 4]);
     }
 
     #[test]
@@ -310,6 +310,6 @@ mod tests {
         let cmd = Cmd::SetFlag {
             flag: txt(5, "flag"),
         };
-        assert_eq!(cmd.to_bytes(), vec![4, 5, 0]); // opcode 4
+        assert_eq!(cmd.to_bytes(), vec![4, 0, 5]); // opcode 4
     }
 }
