@@ -153,20 +153,11 @@ fn parse_location_layer(layer: &Value) -> Result<LocationLayer> {
         .and_then(|v| v.as_array())
         .ok_or_else(|| anyhow!("`script` layer has no `objects` array"))?;
 
-    println!("Found {} script objects", obj_arr.len());
+    println!("Found {} location objects", obj_arr.len());
 
     let mut entries = Vec::<LocationEntry>::with_capacity(obj_arr.len());
 
     for (i, obj) in obj_arr.iter().enumerate() {
-        if i % 100 == 0 {
-            println!(
-                "Processing script object {}/{}: {:?}",
-                i,
-                obj_arr.len(),
-                obj
-            );
-        }
-
         let x = obj
             .get("x")
             .and_then(|v| v.as_f64())
@@ -195,7 +186,7 @@ fn parse_location_layer(layer: &Value) -> Result<LocationLayer> {
         });
     }
 
-    println!("Successfully parsed {} script entries", entries.len());
+    println!("Successfully parsed {} location entries", entries.len());
     Ok(LocationLayer { objects: entries })
 }
 

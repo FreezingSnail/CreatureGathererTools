@@ -39,9 +39,9 @@ pub fn assemble_scripts(parsed_scripts: &ParsedScripts) -> Result<ProcessedScrip
 
                 // encode command and append stub terminator
                 tmp.extend_from_slice(&cmd.to_bytes());
-                tmp.push(0xff);
             }
         }
+        tmp.push(0xff);
 
         // ------- size check ----------------------------------------------
         if tmp.len() > 128 {
@@ -103,9 +103,8 @@ mod tests {
         assert_eq!(parsed.chunks[0].len(), 2, "both scripts in chunk 0");
 
         // ── Offsets ──────────────────────────────────────────────────
-        // Each Msg serialises to 3 bytes, assembler adds 0-terminator
-        // → 4 bytes per command
-        assert_eq!(processed.offsets, vec![0u16, 4u16]);
+        // Each Msg serialises to 3 bytes
+        assert_eq!(processed.offsets, vec![0, 3]);
 
         // Blob must be a Vec<Vec<u8>> with one chunk containing both scripts
         // Chunk 0: [0, 0, 0, 0, 0, 1, 0, 0]
@@ -120,7 +119,7 @@ mod tests {
             ScriptBlob {
                 blob: vec![
                     0, 0, 0, 0, // first  script
-                    0, 1, 0, 0 // second script
+                    0, 1, 255 // second script
                 ],
                 script: "msg {a};msg {b};".into(),
             }

@@ -196,7 +196,7 @@ impl<'a> Parser<'a> {
             Ok(loc) => loc,
         };
 
-        Ok(Cmd::Tp { from, to })
+        Ok(Cmd::TpIf { from, to })
     }
 
     fn parse_if(&mut self) -> Result<Cmd, String> {
@@ -414,28 +414,28 @@ mod tests {
         let test_cases = vec![
             (
                 "tp @loc1 @loc2;",
-                Ok(Cmd::Tp {
+                Ok(Cmd::TpIf {
                     from: Location::Cords(1, 1),
                     to: Location::Cords(2, 2),
                 }),
             ),
             (
                 "tp @loc1 1 2;",
-                Ok(Cmd::Tp {
+                Ok(Cmd::TpIf {
                     from: Location::Cords(1, 1),
                     to: Location::Cords(1, 2),
                 }),
             ),
             (
                 "tp 1 2 @loc1;",
-                Ok(Cmd::Tp {
+                Ok(Cmd::TpIf {
                     from: Location::Cords(1, 2),
                     to: Location::Cords(1, 1),
                 }),
             ),
             (
                 "tp 256 256 0 0;",
-                Ok(Cmd::Tp {
+                Ok(Cmd::TpIf {
                     from: Location::Cords(256, 256),
                     to: Location::Cords(0, 0),
                 }),
@@ -508,6 +508,19 @@ mod tests {
                                 index: 2,
                             },
                         })),
+                    })),
+                }),
+            ),
+            (
+                "if flag_test1 then tp 1 1 0 0 endif;",
+                Ok(Cmd::If {
+                    condition: Condition::FlagSet(Text {
+                        text: "flag_test1".into(),
+                        index: 0,
+                    }),
+                    branches: Branch::Then(Box::new(Cmd::TpIf {
+                        from: Location::Cords(1, 1),
+                        to: Location::Cords(0, 0),
                     })),
                 }),
             ),
