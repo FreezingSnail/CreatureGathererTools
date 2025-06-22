@@ -532,6 +532,23 @@ mod tests {
                     })),
                 }),
             ),
+            (
+                "if flag_test1 then tp 1 1 else tp 0 0 endif;",
+                Ok(Cmd::If {
+                    condition: Condition::FlagSet(Text {
+                        text: "flag_test1".into(),
+                        index: 0,
+                    }),
+                    branches: Branch::ThenElse(
+                        Box::new(Cmd::Tp {
+                            to: Location::Cords(1, 1),
+                        }),
+                        Box::new(Cmd::Tp {
+                            to: Location::Cords(0, 0),
+                        }),
+                    ),
+                }),
+            ),
         ];
 
         for (input, expected) in test_cases {
