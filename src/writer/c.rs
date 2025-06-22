@@ -8,9 +8,13 @@ use std::io::{self, Write};
 use std::path::Path;
 
 pub fn emit(project: &ProcessedProject, out_dir: &Path) -> io::Result<()> {
+    println!("writing opcodes");
     opcode_header(out_dir)?;
+    println!("writing flags");
     flags(&project.flags, out_dir)?;
+    println!("writing locations");
     locations(&project.locations, out_dir)?;
+    println!("writing scripts");
     scripts(&project.blob, out_dir)?;
     Ok(())
 }

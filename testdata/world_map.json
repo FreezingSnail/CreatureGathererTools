@@ -283,7 +283,7 @@
                         {
                          "name":"script",
                          "type":"string",
-                         "value":"tp @test_teleport @test_house;"
+                         "value":"tpif @test_teleport @test_house;"
                         }],
                  "rotation":0,
                  "type":"",
@@ -301,7 +301,7 @@
                         {
                          "name":"script",
                          "type":"string",
-                         "value":"tp @test_house @test_teleport;"
+                         "value":"tpif @test_house @test_teleport;"
                         }],
                  "rotation":0,
                  "type":"",
@@ -319,7 +319,7 @@
                         {
                          "name":"script",
                          "type":"string",
-                         "value":"if flag_test1 then tp 1 1 0 0 endif;"
+                         "value":"if flag_test1 then tp 1 1 endif;"
                         }],
                  "rotation":0,
                  "type":"",
