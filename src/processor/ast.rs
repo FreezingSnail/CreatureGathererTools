@@ -193,12 +193,16 @@ impl ToBytecode for Branch {
         match self {
             Branch::ThenElse(then_cmd, else_cmd) => {
                 buf.push(0);
-                buf.extend_from_slice(&then_cmd.to_bytes());
+                let then = then_cmd.to_bytes();
+                buf.push(then.len() as u8);
+                buf.extend_from_slice(&then);
                 buf.extend_from_slice(&else_cmd.to_bytes());
             }
             Branch::Then(cmd) => {
-                buf.push(1);
-                buf.extend_from_slice(&cmd.to_bytes());
+                buf.push(1); // TODO: Don't think need this?
+                let branch = &cmd.to_bytes();
+                buf.push(branch.len() as u8);
+                buf.extend_from_slice(branch);
             }
         }
         buf

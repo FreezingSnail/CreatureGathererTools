@@ -327,6 +327,16 @@
                  "width":0,
                  "x":38.4114583333333,
                  "y":39.0625
+                },
+              {
+                 "id":12,
+                 "properties":[
+                        {
+                         "name":"script",
+                         "value":"if flag_test1 then tp 1 1 else tp 0 0 endif;"
+                        }],
+                 "x":138.4114583333333,
+                 "y":139.0625
                 }],
          "opacity":1,
          "type":"objectgroup",
