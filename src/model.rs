@@ -46,11 +46,7 @@ pub struct RawTiled {
 /// ─────────────────────────────────────────────────────
 /// Individual layer types
 /// ─────────────────────────────────────────────────────
-#[derive(Debug, Deserialize)]
-pub struct MapLayer {
-    #[serde(flatten)]
-    pub raw: serde_json::Value,
-}
+pub type MapLayer = Vec<u16>;
 
 /// A single "script object" coming from the Tiled layer.
 /// Only the 3 fields required by the compiler/VM are kept.
@@ -83,6 +79,7 @@ pub struct LocationLayer {
 /// Immediately-after-parse representation (raw, 1-to-1 with JSON).
 #[derive(Debug, Clone)]
 pub struct RawProject {
+    pub map: MapLayer,
     pub scripts: ScriptLayer,
     pub locations: LocationLayer,
 }
@@ -95,4 +92,5 @@ pub struct ProcessedProject {
     pub flags: HashMap<String, u16>,
     pub locations: HashMap<String, u16>,
     pub texts: HashMap<String, u16>,
+    pub map: Vec<MapLayer>,
 }
