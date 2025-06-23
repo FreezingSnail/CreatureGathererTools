@@ -5,6 +5,7 @@ pub mod ast;
 pub mod blob;
 pub mod lexer;
 pub mod locations_parser;
+pub mod map_parser;
 pub mod script_parser;
 
 pub use crate::model::Script;
@@ -23,11 +24,13 @@ pub fn run(raw: &RawProject) -> Result<ProcessedProject> {
         }
     };
     let vm_scripts = blob::assemble_scripts(&processed)?;
+    let map = map_parser::parse_map(&raw.map).unwrap();
 
     Ok(ProcessedProject {
         blob: vm_scripts,
         flags: processed.flags,
         locations: processed.tags,
         texts: processed.texts,
+        map: map,
     })
 }

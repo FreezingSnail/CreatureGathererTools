@@ -49,7 +49,7 @@ pub fn load_from_json(json: &str) -> Result<RawTiled> {
 
         match name {
             "map" => {
-                map = Some(serde_json::from_value(layer_val.clone())?);
+                map = Some(parse_map(layer_val)?);
                 println!("Map layer parsed");
             }
             "scripts" => {
@@ -190,8 +190,23 @@ fn parse_location_layer(layer: &Value) -> Result<LocationLayer> {
     Ok(LocationLayer { objects: entries })
 }
 
+fn parse_map(layer: &Value) -> Result<MapLayer> {
+    let data = layer
+        .get("data")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| anyhow!("`script` layer has no `objects` array"))?;
+
+    let mut buf = Vec::new();
+    for v in data {
+        let v = v.as_u64().ok_or_else(|| anyhow!("invalid map data"))?;
+        buf.push(v as u16);
+    }
+    Ok(buf)
+}
+
 pub fn tiled_to_raw(tiled: &RawTiled) -> RawProject {
     RawProject {
+        map: tiled.map.clone(),
         scripts: tiled.scripts.clone(),
         locations: tiled.locations.clone(),
     }

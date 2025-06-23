@@ -7,6 +7,7 @@ use std::path::Path;
 
 pub fn emit(project: &ProcessedProject, out_dir: &Path) -> io::Result<()> {
     scripts(project, out_dir)?;
+    map(project, out_dir)?;
     Ok(())
 }
 
@@ -25,6 +26,22 @@ fn scripts(project: &ProcessedProject, out_dir: &Path) -> io::Result<()> {
             // Write all padding bytes at once instead of one by one
             let padding_bytes = vec![0u8; padding];
             writer.write_all(&padding_bytes)?;
+        }
+    }
+
+    writer.flush()?;
+    Ok(())
+}
+
+fn map(project: &ProcessedProject, out_dir: &Path) -> io::Result<()> {
+    let path = out_dir.join("map.bin");
+    let file = File::create(&path)?;
+    let mut writer = BufWriter::new(file);
+
+    for chunk in &project.map {
+        // Write the actual blob data
+        for &value in chunk {
+            writer.write_all(&value.to_be_bytes())?;
         }
     }
 
