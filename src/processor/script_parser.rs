@@ -102,6 +102,7 @@ impl Controller {
         *v
     }
     fn insert_text(&mut self, text: &String) -> u16 {
+        println!("inserting text {}", text);
         if !self.text.contains_key(text) {
             self.text.insert(text.clone(), self.text_count);
             self.text_count += 1;
@@ -150,6 +151,7 @@ impl<'a> Parser<'a> {
             Token::Ident(ident) => match ident.as_str() {
                 "msg" => self.parse_msg()?,
                 "tmsg" => self.parse_tmsg()?,
+                "smsg" => self.parse_smsg()?,
                 "tp" => self.parse_tp()?,
                 "tpif" => self.parse_tpif()?,
                 "if" => self.parse_if()?,
@@ -166,10 +168,7 @@ impl<'a> Parser<'a> {
         let text = self.parse_text()?;
         let i = self.controller.insert_text(&text);
         Ok(Cmd::Msg {
-            text: Text {
-                text: text,
-                index: i,
-            },
+            text: Text { text, index: i },
         })
     }
 
@@ -179,31 +178,29 @@ impl<'a> Parser<'a> {
         let i = self.controller.insert_text(&text);
         Ok(Cmd::TMsg {
             at: loc,
-            text: Text {
-                text: text,
-                index: i,
-            },
+            text: Text { text, index: i },
+        })
+    }
+
+    fn parse_smsg(&mut self) -> Result<Cmd, String> {
+        let loc = self.parse_location()?;
+        let text = self.parse_text()?;
+        let i = self.controller.insert_text(&text);
+        Ok(Cmd::SMsg {
+            selected: loc,
+            text: Text { text, index: i },
         })
     }
 
     fn parse_tp(&mut self) -> Result<Cmd, String> {
-        let to = match self.parse_location() {
-            Err(e) => return Err(e),
-            Ok(loc) => loc,
-        };
+        let to = self.parse_location()?;
 
         Ok(Cmd::Tp { to })
     }
     fn parse_tpif(&mut self) -> Result<Cmd, String> {
-        let from = match self.parse_location() {
-            Err(e) => return Err(e),
-            Ok(loc) => loc,
-        };
+        let from = self.parse_location()?;
 
-        let to = match self.parse_location() {
-            Err(e) => return Err(e),
-            Ok(loc) => loc,
-        };
+        let to = self.parse_location()?;
 
         Ok(Cmd::TpIf { from, to })
     }
@@ -225,20 +222,14 @@ impl<'a> Parser<'a> {
             None => Branch::Then(Box::new(then_branch)),
         };
 
-        match branches {
-            Branch::ThenElse(_, _) => {
-                let endif = match self.lex.next().unwrap() {
-                    Ok(Token::Ident(ident)) => match ident.as_str() {
-                        "endif" => true,
-                        _ => false,
-                    },
-                    _ => return Err("invalid token after tp".to_string()),
-                };
-                if !endif {
-                    return Err("invalid token after if, expected endif".to_string());
-                }
+        if let Branch::ThenElse(_, _) = branches {
+            let endif = match self.lex.next().unwrap() {
+                Ok(Token::Ident(ident)) => matches!(ident.as_str(), "endif"),
+                _ => return Err("invalid token after tp".to_string()),
+            };
+            if !endif {
+                return Err("invalid token after if, expected endif".to_string());
             }
-            _ => {}
         }
 
         Ok(Cmd::If {
@@ -257,10 +248,7 @@ impl<'a> Parser<'a> {
 
     fn parse_location(&mut self) -> Result<Location, String> {
         let next = self.lex.next().unwrap();
-        let next_token = match next {
-            Err(e) => return Err(e),
-            Ok(token) => token,
-        };
+        let next_token = next?;
 
         match next_token {
             Token::At(at) => {
@@ -291,24 +279,21 @@ impl<'a> Parser<'a> {
 
     fn parse_condition(&mut self) -> Result<Condition, String> {
         let next = self.lex.next().unwrap();
-        let next_token = match next {
-            Err(e) => return Err(e),
-            Ok(token) => token,
-        };
+        let next_token = next?;
 
         match next_token {
             Token::Ident(flag) => {
                 let i = self.controller.insert_flag(&flag);
                 Ok(Condition::FlagSet(Text {
                     text: flag,
-                    index: i as u16,
+                    index: i,
                 }))
             }
             Token::Bang(flag) => {
                 let i = self.controller.insert_flag(&flag);
                 Ok(Condition::FlagClear(Text {
                     text: flag,
-                    index: i as u16,
+                    index: i,
                 }))
             }
             _ => Err("invalid token after if".to_string()),
@@ -317,10 +302,7 @@ impl<'a> Parser<'a> {
 
     fn parse_branch(&mut self) -> Result<Option<Cmd>, String> {
         let next = self.lex.next().unwrap();
-        let next_token = match next {
-            Err(e) => return Err(e),
-            Ok(token) => token,
-        };
+        let next_token = next?;
 
         match next_token {
             Token::Ident(t) => match t.as_str() {
@@ -330,7 +312,7 @@ impl<'a> Parser<'a> {
                     Ok(Some(branch))
                 }
             },
-            _ => Err("invalid token after if".to_string()),
+            _ => Err(format!("invalid token after if {next_token:?}")),
         }
     }
 
@@ -347,19 +329,19 @@ impl<'a> Parser<'a> {
             "setflag" => Cmd::SetFlag {
                 flag: Text {
                     text: flag,
-                    index: i as u16,
+                    index: i,
                 },
             },
             "unsetflag" => Cmd::UnsetFlag {
                 flag: Text {
                     text: flag,
-                    index: i as u16,
+                    index: i,
                 },
             },
             "readflag" => Cmd::ReadFlag {
                 flag: Text {
                     text: flag,
-                    index: i as u16,
+                    index: i,
                 },
             },
             _ => unreachable!(),

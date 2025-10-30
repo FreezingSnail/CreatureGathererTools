@@ -24,13 +24,14 @@ pub fn run(raw: &RawProject) -> Result<ProcessedProject> {
         }
     };
     let vm_scripts = blob::assemble_scripts(&processed)?;
-    let map = map_parser::parse_map(&raw.map).unwrap();
+    let map = map_parser::parse_map(&raw.map);
 
     Ok(ProcessedProject {
         blob: vm_scripts,
         flags: processed.flags,
         locations: processed.tags,
         texts: processed.texts,
-        map: map,
+        map,
+        raw_map: raw.map.clone(),
     })
 }

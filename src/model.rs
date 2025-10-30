@@ -93,4 +93,5 @@ pub struct ProcessedProject {
     pub locations: HashMap<String, u16>,
     pub texts: HashMap<String, u16>,
     pub map: Vec<MapLayer>,
+    pub raw_map: MapLayer,
 }

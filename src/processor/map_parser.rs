@@ -4,24 +4,18 @@
 use crate::model::{CHUNK_COLS, CHUNK_H, CHUNK_W, MapLayer, TOTAL_CHUNKS};
 
 pub type ParsedMap = Vec<MapLayer>;
-/// Chunked representation; `chunks[idx]` holds all tiles that belong
-/// to that chunk – vector length is always `TOTAL_CHUNKS`.
-/// Each chunk contains 32 bytes (8×4 tiles).
+/**
+Chunked representation; `chunks[idx]` holds all tiles that belong
+to that chunk – vector length is always `TOTAL_CHUNKS`.
+Each chunk contains 32 bytes (8×4 tiles).
+Parse the flat 65536-byte map data into chunks matching the script chunking system.
 
-/// Parse the flat 65536-byte map data into chunks matching the script chunking system.
-///
-/// The map is a 256×256 grid where each tile is 1 byte.
-/// Chunks are 8×4 tiles each, resulting in 2048 chunks of 32 bytes each.
-pub fn parse_map(map_layer: &MapLayer) -> Result<ParsedMap, String> {
+The map is a 256×256 grid where each tile is 1 byte.
+Chunks are 8×4 tiles each, resulting in 2048 chunks of 32 bytes each.
+*/
+pub fn parse_map(map_layer: &MapLayer) -> ParsedMap {
     // Extract the flat tile data from the map layer
     let tile_data = map_layer;
-
-    if tile_data.len() != 65536 {
-        return Err(format!(
-            "Expected 65536 bytes of map data, got {}",
-            tile_data.len()
-        ));
-    }
 
     let mut chunks: Vec<MapLayer> = vec![Vec::new(); TOTAL_CHUNKS];
 
@@ -48,7 +42,7 @@ pub fn parse_map(map_layer: &MapLayer) -> Result<ParsedMap, String> {
         }
     }
 
-    Ok(chunks)
+    chunks
 }
 
 #[cfg(test)]

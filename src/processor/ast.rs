@@ -20,6 +20,7 @@ pub struct Text {
 pub enum Opcode {
     Msg = 0,
     TMsg,
+    SMsg,
     Tp,
     TpIf,
     If,
@@ -60,18 +61,20 @@ pub enum Condition {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Cmd {
-    /// `msg {text}`
     Msg {
         text: Text,
     },
 
-    /// `tmsg @loc {text}`
     TMsg {
         at: Location,
         text: Text,
     },
 
-    /// `tp …`
+    SMsg {
+        selected: Location,
+        text: Text,
+    },
+
     Tp {
         to: Location,
     },
@@ -80,7 +83,6 @@ pub enum Cmd {
         to: Location,
     },
 
-    /// `if …`
     If {
         condition: Condition,
         branches: Branch,
@@ -104,6 +106,7 @@ impl Cmd {
     pub const VARIANT_NAMES: &'static [&'static str] = &[
         "Msg",
         "TMsg",
+        "SMsg",
         "Tp",
         "TpIf",
         "If",
@@ -119,6 +122,7 @@ impl Cmd {
         match self {
             Cmd::Msg { .. } => Opcode::Msg,
             Cmd::TMsg { .. } => Opcode::TMsg,
+            Cmd::SMsg { .. } => Opcode::SMsg,
             Cmd::Tp { .. } => Opcode::Tp,
             Cmd::TpIf { .. } => Opcode::TpIf,
             Cmd::If { .. } => Opcode::If,
@@ -220,6 +224,10 @@ impl ToBytecode for Cmd {
             }
             Cmd::TMsg { at, text } => {
                 buf.extend_from_slice(&at.to_bytes());
+                buf.extend_from_slice(&text.to_bytes());
+            }
+            Cmd::SMsg { selected, text } => {
+                buf.extend_from_slice(&selected.to_bytes());
                 buf.extend_from_slice(&text.to_bytes());
             }
             Cmd::Tp { to } => {
