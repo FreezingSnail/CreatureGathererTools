@@ -26,6 +26,7 @@ import {
 import { MapCanvas } from "./canvas";
 import { Palette } from "./palette";
 import { ScriptPane } from "./scriptPane";
+import { Button } from "@/components/ui/button";
 
 export interface EditorDeps {
   readBytes: (path: string) => Promise<Uint8Array>;
@@ -208,24 +209,18 @@ export function MapEditor({
       >
         <div style={{ display: "flex", flexWrap: "wrap", gap: 4, padding: 6 }}>
           {(["map", "npc", "collision", "encounter"] as PaletteTab[]).map((t) => (
-            <button
+            <Button
               key={t}
+              type="button"
+              size="sm"
+              variant={paletteTab === t ? "default" : "ghost"}
               onClick={() => {
                 setPaletteTab(t);
                 dispatch({ type: "SET_LAYER", layer: t as LayerType });
               }}
-              style={{
-                fontSize: 12,
-                padding: "3px 8px",
-                background: paletteTab === t ? "#316dca" : "#222",
-                color: "#ddd",
-                border: "1px solid #444",
-                borderRadius: 3,
-                cursor: "pointer",
-              }}
             >
               {t}
-            </button>
+            </Button>
           ))}
         </div>
         <div style={{ flex: 1, overflow: "auto", padding: 4 }}>
@@ -361,19 +356,49 @@ export function MapEditor({
             ))}
           </select>
           <span style={{ fontSize: 12, marginLeft: 8 }}>Tile: {state.activeTile}</span>
-          <button onClick={() => dispatch({ type: "SET_BRUSH_SIZE", size: state.brushSize - 1 })}>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => dispatch({ type: "SET_BRUSH_SIZE", size: state.brushSize - 1 })}
+          >
             -
-          </button>
+          </Button>
           <span style={{ fontSize: 12 }}>brush {state.brushSize}</span>
-          <button onClick={() => dispatch({ type: "SET_BRUSH_SIZE", size: state.brushSize + 1 })}>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => dispatch({ type: "SET_BRUSH_SIZE", size: state.brushSize + 1 })}
+          >
             +
-          </button>
-          <button disabled={state.undoStack.length === 0} onClick={() => dispatch({ type: "UNDO" })}>
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={state.undoStack.length === 0}
+            onClick={() => dispatch({ type: "UNDO" })}
+          >
             undo
-          </button>
-          <button onClick={() => dispatch({ type: "SET_ZOOM", zoom: state.zoom / 1.5 })}>-Z</button>
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="icon-sm"
+            onClick={() => dispatch({ type: "SET_ZOOM", zoom: state.zoom / 1.5 })}
+          >
+            -Z
+          </Button>
           <span style={{ fontSize: 12 }}>{Math.round(state.zoom * 10) / 10}x</span>
-          <button onClick={() => dispatch({ type: "SET_ZOOM", zoom: state.zoom * 1.5 })}>+Z</button>
+          <Button
+            type="button"
+            variant="outline"
+            size="icon-sm"
+            onClick={() => dispatch({ type: "SET_ZOOM", zoom: state.zoom * 1.5 })}
+          >
+            +Z
+          </Button>
           {toggle("chunks", state.showChunks, () => dispatch({ type: "TOGGLE_CHUNKS" }))}
           {toggle("highlight", state.showChunkHighlight, () =>
             dispatch({ type: "TOGGLE_CHUNK_HIGHLIGHT" })
@@ -387,12 +412,12 @@ export function MapEditor({
             dispatch({ type: "TOGGLE_SCRIPT_OVERLAY" })
           )}
           <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-            <button onClick={save} style={{ background: "#2a5c2a" }}>
+            <Button type="button" variant="default" size="sm" onClick={save}>
               Save
-            </button>
-            <button onClick={compile} style={{ background: "#5c4a2a" }}>
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={compile}>
               Compile
-            </button>
+            </Button>
           </span>
         </div>
 

@@ -2,6 +2,7 @@
 // the `parse_script` command are advisory: red line/col/msg display.
 
 import type { ParseResult } from "./types";
+import { Textarea } from "@/components/ui/textarea";
 
 export interface ScriptPaneProps {
   title: string;
@@ -29,19 +30,12 @@ export function ScriptPane({
       }}
     >
       <label style={{ fontWeight: 600 }}>{title}</label>
-      <textarea
+      <Textarea
         value={script}
         onChange={(e) => onChange(e.target.value)}
         rows={6}
         spellCheck={false}
-        style={{
-          fontFamily: "monospace",
-          fontSize: 12,
-          background: "#111",
-          color: "#ddd",
-          border: "1px solid #444",
-          resize: "vertical",
-        }}
+        className="resize-y font-mono text-xs"
         data-testid="script-textarea"
       />
       {parseKey && parseResult ? (

@@ -2,6 +2,8 @@
 // row-major rectangle (Go buildPalette parity). Uses toDataURL so jsdom-safe.
 
 import { useMemo, useRef } from "react";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { selectRect } from "./geometry";
 
 export interface PaletteProps {
@@ -29,20 +31,21 @@ function TileButton({
     }
   }, [canvas]);
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
       title={`tile ${canvas.width}x${canvas.height}`}
       onClick={(e) => onTap(e.shiftKey)}
+      className={cn(
+        "size-8 shrink-0 overflow-hidden rounded-sm border p-0",
+        isSelected
+          ? "border-2 border-yellow-400 outline outline-1 outline-black"
+          : "border-neutral-700 hover:border-neutral-500"
+      )}
       style={{
-        width: 32,
-        height: 32,
-        padding: 0,
-        border: isSelected ? "2px solid #ffdc00" : "1px solid #444",
-        outline: isSelected ? "1px solid #000" : "none",
         backgroundImage: url ? `url(${url})` : undefined,
         backgroundSize: "cover",
         imageRendering: "pixelated",
-        cursor: "pointer",
       }}
       data-testid="palette-tile"
     />
