@@ -10,6 +10,12 @@ import {
   moveEntryFromMove,
   validateCreatureForm,
 } from "../lib/validation";
+import { Button } from "./ui/button";
+import { Badge } from "./ui/badge";
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "./ui/card";
+import { Input } from "./ui/input";
+import { Label } from "./ui/label";
+import { cn } from "@/lib/utils";
 import { NumberField, SelectField, TextField } from "./fields";
 
 export interface CreatureApi {
@@ -208,51 +214,60 @@ export function CreatureEditor({ api = defaultApi }: { api?: CreatureApi }) {
   if (!loaded) return <div data-testid="creature-loading">loading creatures…</div>;
 
   return (
-    <div className="cgfx-editor" data-testid="creature-editor">
-      <div className="cgfx-editor__list">
-        <div className="cgfx-editor__list-header">Creatures</div>
-        <div className="cgfx-editor__list-items">
+    <div className="flex items-start gap-4 p-4" data-testid="creature-editor">
+      <Card className="w-60 shrink-0">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            Creatures
+            <Badge variant="secondary">{creatures.length}</Badge>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-1">
           {creatures.map((c, i) => (
-            <button
+            <Button
               key={c.id}
               type="button"
-              className={`cgfx-editor__list-item${
-                i === selected ? " cgfx-editor__list-item--selected" : ""
-              }`}
+              variant={i === selected ? "secondary" : "ghost"}
+              className="w-full justify-start"
               onClick={() => populate(i)}
             >
               {c.name}
-            </button>
+            </Button>
           ))}
-        </div>
-        <div className="cgfx-editor__list-actions">
-          <button type="button" onClick={addCreature}>
+        </CardContent>
+        <CardFooter className="gap-2">
+          <Button type="button" onClick={addCreature}>
             + Add
-          </button>
-          <button type="button" onClick={deleteCreature} disabled={selected < 0}>
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            onClick={deleteCreature}
+            disabled={selected < 0}
+          >
             - Delete
-          </button>
-        </div>
-      </div>
+          </Button>
+        </CardFooter>
+      </Card>
 
-      <div className="cgfx-editor__form">
+      <Card className="flex-1">
         {!draft ? (
-          <div className="cgfx-editor__form-empty">Select a creature to edit.</div>
+          <CardContent>
+            <p className="py-4 text-sm text-muted-foreground">Select a creature to edit.</p>
+          </CardContent>
         ) : (
-          <>
+          <CardContent className="flex flex-col gap-4">
+            <div className="grid gap-1.5">
+              <Label>ID</Label>
+              <Input type="text" value={String(creatures[selected].id)} disabled readOnly />
+            </div>
             <TextField
               label="Name"
               value={draft.name}
               onChange={(v) => setDraftField("name", v)}
               error={errors.name}
             />
-            <div className="cgfx-field">
-              <label>ID</label>
-              <div className="cgfx-field__control">
-                <input type="text" value={String(creatures[selected].id)} disabled readOnly />
-              </div>
-            </div>
-            <div className="cgfx-stat-row">
+            <div className="grid grid-cols-3 gap-2">
               <SelectField
                 label="Type 1"
                 value={draft.type1}
@@ -272,7 +287,7 @@ export function CreatureEditor({ api = defaultApi }: { api?: CreatureApi }) {
                 error={errors.evelevel}
               />
             </div>
-            <div className="cgfx-stat-row">
+            <div className="grid grid-cols-3 gap-2">
               <NumberField
                 label="ATK"
                 value={draft.atk}
@@ -292,7 +307,7 @@ export function CreatureEditor({ api = defaultApi }: { api?: CreatureApi }) {
                 error={errors.spcatk}
               />
             </div>
-            <div className="cgfx-stat-row">
+            <div className="grid grid-cols-3 gap-2">
               <NumberField
                 label="SPC DEF"
                 value={draft.spcdef}
@@ -313,7 +328,7 @@ export function CreatureEditor({ api = defaultApi }: { api?: CreatureApi }) {
               />
             </div>
 
-            <div className="cgfx-movegrid">
+            <div className="grid grid-cols-4 gap-2 border-t pt-3">
               <SelectField
                 label="Move 1"
                 value={draft.move1}
@@ -340,47 +355,52 @@ export function CreatureEditor({ api = defaultApi }: { api?: CreatureApi }) {
               />
             </div>
 
-            <div className="cgfx-editor__form">
-              <div className="cgfx-editor__list-header">Move list</div>
-              <div className="cgfx-stat-row">
+            <div className="border-t pt-3">
+              <CardTitle className="mb-3">Move list</CardTitle>
+              <div className="mb-3 grid grid-cols-3 items-end gap-2">
                 <SelectField
                   label="Add move"
                   value={addMoveName}
                   options={moveNames.length ? moveNames : [""]}
                   onChange={setAddMoveName}
                 />
-                <button type="button" onClick={addMoveToList} disabled={!addMoveName}>
+                <Button type="button" onClick={addMoveToList} disabled={!addMoveName}>
                   Add to list
-                </button>
+                </Button>
               </div>
               {draft.moveList.length === 0 ? (
-                <div className="cgfx-editor__form-empty">No moves in list.</div>
+                <p className="text-sm text-muted-foreground">No moves in list.</p>
               ) : (
-                <table className="cgfx-movelist-table">
+                <table className="w-full border-collapse text-sm">
                   <thead>
                     <tr>
-                      <th>Name</th>
-                      <th>Type</th>
-                      <th>Power</th>
-                      <th>Phys</th>
-                      <th>Acc</th>
-                      <th>Effect</th>
-                      <th />
+                      <th className="border px-2 py-1 text-left">Name</th>
+                      <th className="border px-2 py-1 text-left">Type</th>
+                      <th className="border px-2 py-1 text-left">Power</th>
+                      <th className="border px-2 py-1 text-left">Phys</th>
+                      <th className="border px-2 py-1 text-left">Acc</th>
+                      <th className="border px-2 py-1 text-left">Effect</th>
+                      <th className="border px-2 py-1 text-left" />
                     </tr>
                   </thead>
                   <tbody>
                     {draft.moveList.map((me, i) => (
                       <tr key={`${me.id}-${i}`}>
-                        <td>{me.name}</td>
-                        <td>{me.type}</td>
-                        <td>{me.power}</td>
-                        <td>{me.physical ? "Phys" : "Spec"}</td>
-                        <td>{me.accuracy}</td>
-                        <td>{me.effect}</td>
-                        <td>
-                          <button type="button" onClick={() => removeMoveFromList(i)}>
+                        <td className="border px-2 py-1">{me.name}</td>
+                        <td className="border px-2 py-1">{me.type}</td>
+                        <td className="border px-2 py-1">{me.power}</td>
+                        <td className="border px-2 py-1">{me.physical ? "Phys" : "Spec"}</td>
+                        <td className="border px-2 py-1">{me.accuracy}</td>
+                        <td className="border px-2 py-1">{me.effect}</td>
+                        <td className="border px-2 py-1">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => removeMoveFromList(i)}
+                          >
                             Remove
-                          </button>
+                          </Button>
                         </td>
                       </tr>
                     ))}
@@ -389,21 +409,23 @@ export function CreatureEditor({ api = defaultApi }: { api?: CreatureApi }) {
               )}
             </div>
 
-            <div className="cgfx-editor__list-actions">
-              <button type="button" onClick={save}>
+            <div className="flex gap-2">
+              <Button type="button" onClick={save}>
                 Save
-              </button>
+              </Button>
             </div>
             <div
-              className={`cgfx-editor__status${statusError ? " cgfx-editor__status--error" : ""}`}
+              className={cn(
+                "min-h-4 text-sm",
+                statusError ? "text-destructive" : "text-emerald-600 dark:text-emerald-400"
+              )}
               role="status"
             >
               {status}
             </div>
-          </>
+          </CardContent>
         )}
-      </div>
+      </Card>
     </div>
   );
 }
-

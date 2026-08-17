@@ -9,6 +9,12 @@ import {
   maxId,
   validateMoveForm,
 } from "../lib/validation";
+import { Button } from "./ui/button";
+import { Badge } from "./ui/badge";
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "./ui/card";
+import { Input } from "./ui/input";
+import { Label } from "./ui/label";
+import { cn } from "@/lib/utils";
 import { NumberField, SelectField, TextField } from "./fields";
 
 export interface MoveApi {
@@ -155,43 +161,52 @@ export function MoveEditor({ api = defaultApi }: { api?: MoveApi }) {
   if (!loaded) return <div data-testid="move-loading">loading moves…</div>;
 
   return (
-    <div className="cgfx-editor" data-testid="move-editor">
-      <div className="cgfx-editor__list">
-        <div className="cgfx-editor__list-header">Moves</div>
-        <div className="cgfx-editor__list-items">
+    <div className="flex items-start gap-4 p-4" data-testid="move-editor">
+      <Card className="w-60 shrink-0">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            Moves
+            <Badge variant="secondary">{moves.length}</Badge>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-1">
           {moves.map((m, i) => (
-            <button
+            <Button
               key={m.id}
               type="button"
-              className={`cgfx-editor__list-item${
-                i === selected ? " cgfx-editor__list-item--selected" : ""
-              }`}
+              variant={i === selected ? "secondary" : "ghost"}
+              className="w-full justify-start"
               onClick={() => populate(i)}
             >
               {m.name}
-            </button>
+            </Button>
           ))}
-        </div>
-        <div className="cgfx-editor__list-actions">
-          <button type="button" onClick={addMove}>
+        </CardContent>
+        <CardFooter className="gap-2">
+          <Button type="button" onClick={addMove}>
             + Add
-          </button>
-          <button type="button" onClick={deleteMove} disabled={selected < 0}>
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            onClick={deleteMove}
+            disabled={selected < 0}
+          >
             - Delete
-          </button>
-        </div>
-      </div>
+          </Button>
+        </CardFooter>
+      </Card>
 
-      <div className="cgfx-editor__form">
+      <Card className="flex-1">
         {!draft ? (
-          <div className="cgfx-editor__form-empty">Select a move to edit.</div>
+          <CardContent>
+            <p className="py-4 text-sm text-muted-foreground">Select a move to edit.</p>
+          </CardContent>
         ) : (
-          <>
-            <div className="cgfx-field">
-              <label>ID</label>
-              <div className="cgfx-field__control">
-                <input type="text" value={String(moves[selected].id)} disabled readOnly />
-              </div>
+          <CardContent className="flex flex-col gap-4">
+            <div className="grid gap-1.5">
+              <Label>ID</Label>
+              <Input type="text" value={String(moves[selected].id)} disabled readOnly />
             </div>
             <TextField
               label="Name"
@@ -199,7 +214,7 @@ export function MoveEditor({ api = defaultApi }: { api?: MoveApi }) {
               onChange={(v) => setDraftField("name", v)}
               error={errors.name}
             />
-            <div className="cgfx-stat-row">
+            <div className="grid grid-cols-3 gap-2">
               <SelectField
                 label="Type"
                 value={draft.type}
@@ -213,7 +228,7 @@ export function MoveEditor({ api = defaultApi }: { api?: MoveApi }) {
                 onChange={(v) => setDraftField("physical", v)}
               />
             </div>
-            <div className="cgfx-stat-row">
+            <div className="grid grid-cols-3 gap-2">
               <NumberField
                 label="Power"
                 value={draft.power}
@@ -233,20 +248,23 @@ export function MoveEditor({ api = defaultApi }: { api?: MoveApi }) {
                 onChange={(v) => setDraftField("effect", v)}
               />
             </div>
-            <div className="cgfx-editor__list-actions">
-              <button type="button" onClick={save}>
+            <div className="flex gap-2">
+              <Button type="button" onClick={save}>
                 Save
-              </button>
+              </Button>
             </div>
             <div
-              className={`cgfx-editor__status${statusError ? " cgfx-editor__status--error" : ""}`}
+              className={cn(
+                "min-h-4 text-sm",
+                statusError ? "text-destructive" : "text-emerald-600 dark:text-emerald-400"
+              )}
               role="status"
             >
               {status}
             </div>
-          </>
+          </CardContent>
         )}
-      </div>
+      </Card>
     </div>
   );
 }

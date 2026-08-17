@@ -1,5 +1,7 @@
 import { useId } from "react";
-import "./editors.css";
+import { Input } from "./ui/input";
+import { Label } from "./ui/label";
+import { cn } from "@/lib/utils";
 
 interface TextFieldProps {
   label: string;
@@ -13,20 +15,19 @@ interface TextFieldProps {
 export function TextField({ label, value, onChange, error, disabled, placeholder }: TextFieldProps) {
   const id = useId();
   return (
-    <div className={`cgfx-field${error ? " cgfx-field--invalid" : ""}`}>
-      <label htmlFor={id}>{label}</label>
-      <div className="cgfx-field__control">
-        <input
-          id={id}
-          type="text"
-          value={value}
-          disabled={disabled}
-          placeholder={placeholder}
-          onChange={(e) => onChange(e.target.value)}
-        />
-      </div>
+    <div className="grid gap-1.5">
+      <Label htmlFor={id}>{label}</Label>
+      <Input
+        id={id}
+        type="text"
+        value={value}
+        disabled={disabled}
+        placeholder={placeholder}
+        aria-invalid={error ? true : undefined}
+        onChange={(e) => onChange(e.target.value)}
+      />
       {error ? (
-        <span className="cgfx-field__error" role="alert">
+        <span className="text-sm text-destructive" role="alert">
           {error}
         </span>
       ) : null}
@@ -46,20 +47,19 @@ interface NumberFieldProps {
 export function NumberField({ label, value, onChange, error, disabled }: NumberFieldProps) {
   const id = useId();
   return (
-    <div className={`cgfx-field${error ? " cgfx-field--invalid" : ""}`}>
-      <label htmlFor={id}>{label}</label>
-      <div className="cgfx-field__control">
-        <input
-          id={id}
-          type="text"
-          inputMode="numeric"
-          value={value}
-          disabled={disabled}
-          onChange={(e) => onChange(e.target.value)}
-        />
-      </div>
+    <div className="grid gap-1.5">
+      <Label htmlFor={id}>{label}</Label>
+      <Input
+        id={id}
+        type="text"
+        inputMode="numeric"
+        value={value}
+        disabled={disabled}
+        aria-invalid={error ? true : undefined}
+        onChange={(e) => onChange(e.target.value)}
+      />
       {error ? (
-        <span className="cgfx-field__error" role="alert">
+        <span className="text-sm text-destructive" role="alert">
           {error}
         </span>
       ) : null}
@@ -75,25 +75,31 @@ interface SelectFieldProps {
   disabled?: boolean;
 }
 
+const selectClasses = cn(
+  "flex h-9 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-xs outline-none transition-[color,box-shadow]",
+  "focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50",
+  "disabled:cursor-not-allowed disabled:opacity-50",
+  "dark:bg-input/30 md:text-sm"
+);
+
 export function SelectField({ label, value, options, onChange, disabled }: SelectFieldProps) {
   const id = useId();
   return (
-    <div className="cgfx-field">
-      <label htmlFor={id}>{label}</label>
-      <div className="cgfx-field__control">
-        <select
-          id={id}
-          value={value}
-          disabled={disabled}
-          onChange={(e) => onChange(e.target.value)}
-        >
-          {options.map((opt) => (
-            <option key={opt} value={opt}>
-              {opt}
-            </option>
-          ))}
-        </select>
-      </div>
+    <div className="grid gap-1.5">
+      <Label htmlFor={id}>{label}</Label>
+      <select
+        id={id}
+        value={value}
+        disabled={disabled}
+        className={selectClasses}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        {options.map((opt) => (
+          <option key={opt} value={opt}>
+            {opt}
+          </option>
+        ))}
+      </select>
     </div>
   );
 }
