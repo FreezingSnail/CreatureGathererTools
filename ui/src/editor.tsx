@@ -199,12 +199,11 @@ export function MapEditor({
     <div style={{ display: "flex", height: "100%", fontFamily: "system-ui, sans-serif" }}>
       {/* sidebar */}
       <div
+        className="border-r border-neutral-800 bg-neutral-900"
         style={{
           width: 230,
-          borderRight: "1px solid #333",
           display: "flex",
           flexDirection: "column",
-          background: "#171717",
         }}
       >
         <div style={{ display: "flex", flexWrap: "wrap", gap: 4, padding: 6 }}>
@@ -265,7 +264,7 @@ export function MapEditor({
                 </select>
               </label>
               {state.map.collision_types.length === 0 && (
-                <span style={{ fontSize: 11, color: "#888" }}>
+                <span className="text-muted-foreground" style={{ fontSize: 11 }}>
                   No collision types in map JSON — painting uses type 1.
                 </span>
               )}
@@ -303,7 +302,7 @@ export function MapEditor({
                 </select>
               </label>
               {state.map.encounter_zones.length === 0 && (
-                <span style={{ fontSize: 11, color: "#888" }}>
+                <span className="text-muted-foreground" style={{ fontSize: 11 }}>
                   No encounter zones in map JSON — painting uses zone 0.
                 </span>
               )}
@@ -323,7 +322,10 @@ export function MapEditor({
             </div>
           )}
         </div>
-        <div style={{ padding: 6, fontSize: 11, color: "#888", borderTop: "1px solid #333" }}>
+        <div
+          className="border-t border-neutral-800 text-muted-foreground"
+          style={{ padding: 6, fontSize: 11 }}
+        >
           wheel: zoom · shift+wheel: pan · drag: paint · alt/middle-drag: pan ·
           right-click: delete/clear · ctrl+z: undo
         </div>
@@ -333,14 +335,13 @@ export function MapEditor({
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
         {/* toolbar */}
         <div
+          className="border-b border-neutral-800 bg-neutral-800/80"
           style={{
             display: "flex",
             gap: 8,
             alignItems: "center",
             padding: "6px 10px",
-            borderBottom: "1px solid #333",
             flexWrap: "wrap",
-            background: "#1f1f1f",
           }}
         >
           <span style={{ fontSize: 12 }}>Layer:</span>
@@ -457,23 +458,25 @@ export function MapEditor({
         </div>
 
         {/* status + compile output */}
-        <div style={{ borderTop: "1px solid #333", padding: "4px 10px", fontSize: 12, background: "#1f1f1f" }}>
+        <div
+          className="border-t border-neutral-800 bg-neutral-800/80"
+          style={{ padding: "4px 10px", fontSize: 12 }}
+        >
           status: {statusRef.current || state.status || "ready"}
         </div>
         {state.compileResult && (
           <div
+            className="border-t border-neutral-800 bg-neutral-900"
             style={{
-              borderTop: "1px solid #333",
               padding: "6px 10px",
               fontSize: 12,
               maxHeight: 120,
               overflow: "auto",
-              background: "#181818",
             }}
             data-testid="compile-result"
           >
             {state.compileResult.ok ? (
-              <div style={{ color: "#6f6" }}>
+              <div className="text-green-400">
                 compile ok — {state.compileResult.artifacts.length} artifacts
                 <ul>
                   {state.compileResult.artifacts.map((a) => (
@@ -482,7 +485,7 @@ export function MapEditor({
                 </ul>
               </div>
             ) : (
-              <ul style={{ color: "#f66", margin: 0, paddingLeft: 18 }}>
+              <ul className="text-red-400" style={{ margin: 0, paddingLeft: 18 }}>
                 {state.compileResult.errors.map((e, i) => (
                   <li key={i}>
                     line {e.line}: {e.msg}

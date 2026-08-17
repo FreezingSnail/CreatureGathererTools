@@ -64,7 +64,7 @@ export function Palette({
 
   if (tiles.length === 0) {
     return (
-      <div style={{ padding: 8, color: "#888" }} data-testid="palette">
+      <div className="text-muted-foreground" style={{ padding: 8 }} data-testid="palette">
         {emptyLabel}
       </div>
     );

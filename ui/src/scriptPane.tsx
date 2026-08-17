@@ -21,8 +21,8 @@ export function ScriptPane({
 }: ScriptPaneProps) {
   return (
     <div
+      className="border-t border-neutral-800"
       style={{
-        borderTop: "1px solid #333",
         padding: 8,
         display: "flex",
         flexDirection: "column",
@@ -40,11 +40,11 @@ export function ScriptPane({
       />
       {parseKey && parseResult ? (
         parseResult.ok ? (
-          <div style={{ color: "#6f6" }} data-testid="script-ok">
+          <div className="text-green-400" data-testid="script-ok">
             script parses ok
           </div>
         ) : (
-          <ul style={{ margin: 0, paddingLeft: 18, color: "#f66" }} data-testid="script-errors">
+          <ul className="text-red-400" style={{ margin: 0, paddingLeft: 18 }} data-testid="script-errors">
             {parseResult.errors.map((err, i) => (
               <li key={i} style={{ fontFamily: "monospace", fontSize: 12 }}>
                 line {err.line}, col {err.col}: {err.msg}
