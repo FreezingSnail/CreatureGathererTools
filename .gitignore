@@ -1,2 +1,12 @@
+# Tauri
 /target
+/src-tauri/gen/schemas
+
+# Node
+/ui/node_modules
+/ui/dist
+
+# Cargo
 /output
+# worker reports
+output.md

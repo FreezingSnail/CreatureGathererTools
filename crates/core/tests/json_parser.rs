@@ -1,6 +1,6 @@
 use std::fs;
 
-use pokervm_rust::parser::load_from_json;
+use creaturevm::parser::load_from_json;
 
 #[test]
 fn parses_script_objects() {
