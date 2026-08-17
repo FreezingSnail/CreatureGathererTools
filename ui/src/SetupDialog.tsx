@@ -3,6 +3,17 @@
 
 import { useState, type FormEvent } from "react";
 import type { Config } from "./types";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 export interface SetupFields {
   creatures_json: string;
@@ -70,30 +81,37 @@ export function SetupDialog({ initial, error, onSubmit }: SetupDialogProps) {
   };
 
   return (
-    <main className="cgfx-setup" data-testid="setup-dialog">
-      <form className="cgfx-setup__form" onSubmit={submit}>
-        <h1 className="cgfx-setup__title">CreatureGathererFX — Setup</h1>
-        <p className="cgfx-setup__hint">Create creature-tools.json config file</p>
-        {FIELDS.map((f) => (
-          <div className="cgfx-field" key={f.key}>
-            <label htmlFor={`setup-${f.key}`}>{f.label}</label>
-            <input
-              id={`setup-${f.key}`}
-              type="text"
-              value={values[f.key]}
-              onChange={(e) => setField(f.key, e.target.value)}
-            />
-          </div>
-        ))}
-        <button type="submit" className="cgfx-setup__submit">
-          Create Config
-        </button>
-        {error && (
-          <div className="cgfx-field__error" role="alert" data-testid="setup-error">
-            {error}
-          </div>
-        )}
-      </form>
+    <main className="flex min-h-screen items-center justify-center p-6" data-testid="setup-dialog">
+      <Card className="w-full max-w-md">
+        <CardHeader>
+          <CardTitle>CreatureGathererFX — Setup</CardTitle>
+          <CardDescription>Create creature-tools.json config file</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form className="grid gap-4" onSubmit={submit}>
+            {FIELDS.map((f) => (
+              <div className="grid gap-2" key={f.key}>
+                <Label htmlFor={`setup-${f.key}`}>{f.label}</Label>
+                <Input
+                  id={`setup-${f.key}`}
+                  type="text"
+                  value={values[f.key]}
+                  onChange={(e) => setField(f.key, e.target.value)}
+                />
+              </div>
+            ))}
+            <Button type="submit" className="mt-2">
+              Create Config
+            </Button>
+            {error && (
+              <Alert variant="destructive" data-testid="setup-error">
+                <AlertTitle>Setup failed</AlertTitle>
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
+          </form>
+        </CardContent>
+      </Card>
     </main>
   );
 }
