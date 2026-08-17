@@ -393,6 +393,17 @@ fn ping() -> String {
     "pong".into()
 }
 
+/// Read a file's raw bytes (used by the frontend to load tileset PNGs from
+/// the config paths). Never panics; errors are returned as strings.
+fn read_file_bytes_impl(path: &str) -> Result<Vec<u8>, String> {
+    std::fs::read(path).map_err(err_str)
+}
+
+#[tauri::command]
+fn read_file_bytes(path: String) -> Result<Vec<u8>, String> {
+    read_file_bytes_impl(&path)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -415,6 +426,7 @@ pub fn run() {
             compile_map,
             compile_all,
             parse_script,
+            read_file_bytes,
             tiled_import_path,
             tiled_export_path,
         ])
@@ -550,5 +562,24 @@ mod tests {
             text: Text { text: "hi".into(), index: 3 },
         };
         assert_eq!(cmd.to_bytes(), vec![0, 0, 3]);
+    }
+
+    #[test]
+    fn read_file_bytes_returns_file_contents() {
+        // Testdata fixture lives at workspace root (tests run from src-tauri/).
+        let path = "../crates/core/testdata/map.json";
+        let bytes = read_file_bytes_impl(path).expect("fixture readable");
+        let expected = std::fs::read(path).expect("fixture readable");
+        assert_eq!(bytes, expected);
+        assert!(bytes.len() > 0);
+        // Every byte is the raw value (no JSON-wrapping).
+        assert_eq!(bytes[0], b'{');
+    }
+
+    #[test]
+    fn read_file_bytes_missing_path_errors() {
+        let r = read_file_bytes_impl("/nonexistent/definitely-missing.png");
+        assert!(r.is_err());
+        assert!(r.unwrap_err().contains("No such file"));
     }
 }

@@ -1,4 +1,4 @@
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 
 // Tauri convention: https://v2.tauri.app/start/frontend/vite/
@@ -17,4 +17,9 @@ export default defineConfig({
   },
   // env prefix for tauri variables
   envPrefix: ["VITE_", "TAURI_"],
+  test: {
+    environment: "jsdom",
+    setupFiles: ["./src/test/setup.ts"],
+    css: false,
+  },
 });
