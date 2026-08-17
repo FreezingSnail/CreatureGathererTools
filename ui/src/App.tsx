@@ -10,7 +10,10 @@ import { CreatureEditor, MoveEditor } from "./components";
 import { SetupDialog } from "./SetupDialog";
 import { emptyMap } from "./state";
 import type { Config, GameMap, CompileResult, ParseResult } from "./types";
-import "./app.css";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "./components/ui/tabs";
+import { Button } from "./components/ui/button";
+import { Alert } from "./components/ui/alert";
+import { Card, CardContent } from "./components/ui/card";
 
 const readBytes = async (path: string): Promise<Uint8Array> =>
   new Uint8Array(await invoke<number[]>("read_file_bytes", { path }));
@@ -164,8 +167,8 @@ function App() {
 
   if (phase === "checking") {
     return (
-      <main className="cgfx-app">
-        <p className="cgfx-app__status">loading…</p>
+      <main className="flex h-screen flex-col bg-background text-foreground">
+        <p className="px-2.5 py-1 text-sm">loading…</p>
       </main>
     );
   }
@@ -179,110 +182,118 @@ function App() {
   }
 
   return (
-    <main className="cgfx-app">
-      <header className="cgfx-app__header">
-        <span className="cgfx-app__title">CreatureGathererFX</span>
-        <div className="cgfx-app__tabs" role="tablist" aria-label="editors">
-          {TABS.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              role="tab"
-              aria-selected={tab === t.id}
-              aria-controls={`tab-panel-${t.id}`}
-              className={`cgfx-app__tab${tab === t.id ? " cgfx-app__tab--active" : ""}`}
-              onClick={() => setTab(t.id)}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
-        <div className="cgfx-app__actions">
-          <button type="button" onClick={saveMap}>
-            Save map
-          </button>
-          <button type="button" onClick={compileAll}>
-            Compile all
-          </button>
-          <button type="button" onClick={reloadConfig}>
-            Reload config
-          </button>
-        </div>
-      </header>
+    <main className="flex h-screen flex-col bg-background text-foreground">
+      <Tabs
+        value={tab}
+        onValueChange={(v) => setTab(v as TabId)}
+        className="flex min-h-0 flex-1 flex-col"
+      >
+        <header className="flex flex-wrap items-center gap-4 border-b px-2.5 py-1.5">
+          <span className="whitespace-nowrap text-[13px] font-semibold">
+            CreatureGathererFX
+          </span>
+          <TabsList variant="line" aria-label="editors">
+            {TABS.map((t) => (
+              <TabsTrigger key={t.id} value={t.id}>
+                {t.label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+          <div className="ml-auto flex gap-1.5">
+            <Button size="sm" variant="outline" onClick={saveMap}>
+              Save map
+            </Button>
+            <Button size="sm" variant="outline" onClick={compileAll}>
+              Compile all
+            </Button>
+            <Button size="sm" variant="outline" onClick={reloadConfig}>
+              Reload config
+            </Button>
+          </div>
+        </header>
 
-      {headerStatus && (
-        <div
-          className={`cgfx-app__status${headerStatus.error ? " cgfx-app__status--error" : ""}`}
-          role="status"
-        >
-          {headerStatus.text}
-        </div>
-      )}
+        {headerStatus && (
+          <Alert
+            variant={headerStatus.error ? "destructive" : "default"}
+            role="status"
+            className="shrink-0 rounded-none border-x-0 border-t-0 px-2.5 py-1.5 text-xs"
+          >
+            {headerStatus.text}
+          </Alert>
+        )}
 
-      {compileResult && (
-        <div className="cgfx-app__compile" data-testid="app-compile-result">
-          {compileResult.ok ? (
-            <div>
-              compile ok — {compileResult.artifacts.length} artifacts
-              <ul>
-                {compileResult.artifacts.map((a) => (
-                  <li key={a}>{a}</li>
-                ))}
-              </ul>
-            </div>
-          ) : (
-            <ul>
-              {compileResult.errors.map((e, i) => (
-                <li key={i}>
-                  line {e.line}: {e.msg}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
+        {compileResult && (
+          <Card
+            data-testid="app-compile-result"
+            className="max-h-[140px] shrink-0 gap-0 overflow-auto rounded-none border-x-0 border-t-0 px-0 py-0 text-xs shadow-none"
+          >
+            <CardContent className="px-2.5 py-1.5">
+              {compileResult.ok ? (
+                <div>
+                  <p className="text-muted-foreground">
+                    compile ok — {compileResult.artifacts.length} artifacts
+                  </p>
+                  <ul className="list-disc pl-5">
+                    {compileResult.artifacts.map((a) => (
+                      <li key={a}>{a}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                <ul className="list-disc pl-5">
+                  {compileResult.errors.map((e, i) => (
+                    <li key={i}>
+                      line {e.line}: {e.msg}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
-      <div className="cgfx-app__body">
-        <section
-          id="tab-panel-map"
-          role="tabpanel"
-          aria-label="map"
-          data-testid="tab-panel-map"
-          className="cgfx-app__panel"
-          style={{ display: tab === "map" ? undefined : "none" }}
-        >
-          {config && map && (
-            <MapEditor
-              key={bootKey}
-              config={config}
-              map={map}
-              deps={deps}
-              active={tab === "map"}
-              saveRef={mapSaveRef}
-            />
-          )}
-        </section>
-        <section
-          id="tab-panel-creature"
-          role="tabpanel"
-          aria-label="creature"
-          data-testid="tab-panel-creature"
-          className="cgfx-app__panel"
-          style={{ display: tab === "creature" ? undefined : "none" }}
-        >
-          <CreatureEditor key={bootKey} />
-        </section>
-        <section
-          id="tab-panel-move"
-          role="tabpanel"
-          aria-label="move"
-          data-testid="tab-panel-move"
-          className="cgfx-app__panel"
-          style={{ display: tab === "move" ? undefined : "none" }}
-        >
-          <MoveEditor key={bootKey} />
-        </section>
-      </div>
+        <div className="flex min-h-0 flex-1 flex-col">
+          <TabsContent
+            value="map"
+            forceMount
+            id="tab-panel-map"
+            data-testid="tab-panel-map"
+            aria-label="map"
+            className="min-h-0 flex-1"
+          >
+            {config && map && (
+              <MapEditor
+                key={bootKey}
+                config={config}
+                map={map}
+                deps={deps}
+                active={tab === "map"}
+                saveRef={mapSaveRef}
+              />
+            )}
+          </TabsContent>
+          <TabsContent
+            value="creature"
+            forceMount
+            id="tab-panel-creature"
+            data-testid="tab-panel-creature"
+            aria-label="creature"
+            className="min-h-0 flex-1"
+          >
+            <CreatureEditor key={bootKey} />
+          </TabsContent>
+          <TabsContent
+            value="move"
+            forceMount
+            id="tab-panel-move"
+            data-testid="tab-panel-move"
+            aria-label="move"
+            className="min-h-0 flex-1"
+          >
+            <MoveEditor key={bootKey} />
+          </TabsContent>
+        </div>
+      </Tabs>
     </main>
   );
 }
