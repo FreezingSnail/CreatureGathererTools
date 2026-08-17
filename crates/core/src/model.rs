@@ -10,7 +10,7 @@ pub const CHUNK_ROWS: i32 = MAP_H / CHUNK_H; // 64
 pub const TOTAL_CHUNKS: usize = (CHUNK_COLS * CHUNK_ROWS) as usize;
 
 use crate::processor::ast::Cmd;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -94,4 +94,111 @@ pub struct ProcessedProject {
     pub texts: HashMap<String, u16>,
     pub map: Vec<MapLayer>,
     pub raw_map: MapLayer,
+}
+
+// ─────────────────────────────────────────────────────
+// Canonical game-data model (ported from creatureTools
+// internal/model/model.go). JSON field names mirror the
+// Go struct tags exactly so existing data files keep
+// working.
+// ─────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MoveEntry {
+    pub id: i32,
+    pub name: String,
+    #[serde(rename = "type")]
+    pub r#type: String,
+    pub power: i32,
+    pub physical: i32,
+    pub accuracy: i32,
+    pub effect: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Creature {
+    pub name: String,
+    pub id: i32,
+    pub type1: String,
+    pub type2: String,
+    #[serde(rename = "evelevel")]
+    pub evo_level: i32,
+    pub atk: i32,
+    #[serde(rename = "deff")]
+    pub def: i32,
+    #[serde(rename = "spcatk")]
+    pub spc_atk: i32,
+    #[serde(rename = "spcdef")]
+    pub spc_def: i32,
+    pub hp: i32,
+    pub spd: i32,
+    pub move1: i32,
+    pub move2: i32,
+    pub move3: i32,
+    pub move4: i32,
+    #[serde(rename = "moveList")]
+    pub move_list: Vec<MoveEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Move {
+    pub id: i32,
+    pub name: String,
+    #[serde(rename = "type")]
+    pub r#type: String,
+    pub power: i32,
+    pub physical: i32,
+    pub accuracy: i32,
+    pub effect: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NPCObject {
+    pub id: i32,
+    pub x: i32,
+    pub y: i32,
+    #[serde(rename = "sprite_id")]
+    pub sprite_id: i32,
+    pub script: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ScriptObject {
+    pub id: i32,
+    pub x: i32,
+    pub y: i32,
+    pub script: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CollisionType {
+    pub id: i32,
+    pub name: String,
+    pub color: String, // hex RGBA e.g. "#FF000080"
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EncounterZone {
+    pub id: i32,
+    pub name: String,
+    pub rate: i32, // 0-100
+    #[serde(rename = "creature_ids")]
+    pub creature_ids: Vec<i32>,
+}
+
+/// Our own canonical map format (schema we control).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GameMap {
+    pub width: u32,
+    pub height: u32,
+    pub tiles: Vec<Vec<u16>>,
+    pub npcs: Vec<NPCObject>,
+    pub scripts: Vec<ScriptObject>,
+    /// 0 = none, else CollisionType.ID
+    pub collision: Vec<Vec<u8>>,
+    /// user-defined types
+    pub collision_types: Vec<CollisionType>,
+    /// -1 = none, else EncounterZone.ID
+    pub encounters: Vec<Vec<i32>>,
+    pub encounter_zones: Vec<EncounterZone>,
 }

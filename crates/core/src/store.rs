@@ -1,0 +1,302 @@
+//! JSON store for the canonical game-data files (map / creatures / moves),
+//! ported from creatureTools internal/store/store.go.
+use crate::config::Config;
+use crate::model::{Creature, GameMap, Move};
+use std::path::Path;
+
+/// Loads and saves the canonical game-data JSON files. Mirrors Go's
+/// `store.Store`: every save uses pretty-printed JSON with 2-space indent
+/// (Go `json.MarshalIndent(x, "", "  ")`).
+pub struct Store<'a> {
+    cfg: &'a Config,
+}
+
+impl<'a> Store<'a> {
+    pub fn new(cfg: &'a Config) -> Store<'a> {
+        Store { cfg }
+    }
+
+    pub fn load_creatures(&self) -> anyhow::Result<Vec<Creature>> {
+        load_json(&self.cfg.creatures_json)
+    }
+
+    pub fn save_creatures(&self, creatures: &[Creature]) -> anyhow::Result<()> {
+        save_json(&self.cfg.creatures_json, creatures)
+    }
+
+    pub fn load_moves(&self) -> anyhow::Result<Vec<Move>> {
+        load_json(&self.cfg.moves_json)
+    }
+
+    pub fn save_moves(&self, moves: &[Move]) -> anyhow::Result<()> {
+        save_json(&self.cfg.moves_json, moves)
+    }
+
+    pub fn load_map(&self) -> anyhow::Result<GameMap> {
+        load_json(&self.cfg.map_json)
+    }
+
+    pub fn save_map(&self, map: &GameMap) -> anyhow::Result<()> {
+        save_json(&self.cfg.map_json, map)
+    }
+}
+
+fn load_json<T: serde::de::DeserializeOwned>(path: impl AsRef<Path>) -> anyhow::Result<T> {
+    let path = path.as_ref();
+    let data = std::fs::read(path).map_err(|e| {
+        anyhow::anyhow!("reading {}: {e}", path.display())
+    })?;
+    serde_json::from_slice(&data).map_err(|e| anyhow::anyhow!("parsing {}: {e}", path.display()))
+}
+
+fn save_json<T: serde::Serialize + ?Sized>(path: impl AsRef<Path>, value: &T) -> anyhow::Result<()> {
+    let path = path.as_ref();
+    let data = serde_json::to_string_pretty(value)
+        .map_err(|e| anyhow::anyhow!("serializing {}: {e}", path.display()))?;
+    std::fs::write(path, data)
+        .map_err(|e| anyhow::anyhow!("writing {}: {e}", path.display()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{EncounterZone, NPCObject};
+
+    const TD: &str = env!("CARGO_MANIFEST_DIR");
+    const CREATURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/creatures.json");
+    const MOVES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/moves.json");
+    const MAP: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/map.json");
+
+    fn cfg() -> Config {
+        Config {
+            creatures_json: CREATURES.to_string(),
+            moves_json: MOVES.to_string(),
+            map_json: MAP.to_string(),
+            tileset_png: String::new(),
+            map_tileset_png: String::new(),
+            npc_tileset_png: String::new(),
+            output_dir: String::new(),
+        }
+    }
+
+    #[test]
+    fn load_creatures_fixture_fields() {
+        let c = cfg();
+        let s = Store::new(&c);
+        let creatures = s.load_creatures().expect("fixture must parse");
+        assert_eq!(creatures.len(), 2);
+        assert_eq!(creatures[0].name, "SquibbleSnail");
+        assert_eq!(creatures[0].id, 0);
+        assert_eq!(creatures[0].type1, "wind");
+        assert_eq!(creatures[0].type2, "none");
+        assert_eq!(creatures[0].evo_level, 8);
+        assert_eq!(creatures[0].atk, 3);
+        assert_eq!(creatures[0].def, 3);
+        assert_eq!(creatures[0].spc_atk, 2);
+        assert_eq!(creatures[0].spc_def, 2);
+        assert_eq!(creatures[0].hp, 3);
+        assert_eq!(creatures[0].spd, 3);
+        assert_eq!(creatures[0].move1, 8);
+        assert_eq!(creatures[0].move2, 32);
+        assert_eq!(creatures[0].move_list.len(), 1);
+        assert_eq!(creatures[0].move_list[0].name, "thought");
+        assert_eq!(creatures[0].move_list[0].r#type, "spirit");
+        assert_eq!(creatures[1].name, "NewOne");
+        assert_eq!(creatures[1].id, 99);
+        assert!(creatures[1].move_list.is_empty());
+    }
+
+    #[test]
+    fn load_moves_fixture_fields() {
+        let c = cfg();
+        let s = Store::new(&c);
+        let moves = s.load_moves().expect("fixture must parse");
+        assert_eq!(moves.len(), 2);
+        assert_eq!(moves[0].id, 0);
+        assert_eq!(moves[0].name, "smite");
+        assert_eq!(moves[0].r#type, "spirit");
+        assert_eq!(moves[0].power, 10);
+        assert_eq!(moves[0].physical, 0);
+        assert_eq!(moves[0].accuracy, 100);
+        assert_eq!(moves[0].effect, "NONE");
+    }
+
+    #[test]
+    fn load_map_fixture_fields() {
+        let c = cfg();
+        let s = Store::new(&c);
+        let m = s.load_map().expect("fixture must parse");
+        assert_eq!(m.width, 3);
+        assert_eq!(m.height, 2);
+        assert_eq!(m.tiles.len(), 2);
+        assert_eq!(m.tiles[0], vec![1, 2, 3]);
+        assert_eq!(m.collision.len(), 2);
+        assert_eq!(m.collision[1][0], 1);
+        assert_eq!(m.collision_types.len(), 2);
+        assert_eq!(m.collision_types[0].color, "#FF000080");
+        assert_eq!(m.encounters[1][1], -1);
+        assert_eq!(m.encounter_zones.len(), 1);
+        assert_eq!(m.encounter_zones[0].creature_ids, vec![0, 5]);
+        assert_eq!(m.npcs.len(), 1);
+        assert_eq!(m.npcs[0].sprite_id, 12);
+        assert_eq!(m.scripts.len(), 1);
+        assert_eq!(m.scripts[0].script, "talk");
+    }
+
+    /// Saves land in dedicated roundtrip_* files so the read-only fixtures
+    /// stay pristine (mirrors Go's setup which copied fixtures into a fresh
+    /// working dir).
+    fn roundtrip_cfg(what: &str) -> Config {
+        let base = cfg();
+        let mut c = base.clone();
+        match what {
+            "creatures" => c.creatures_json = format!("{TD}/testdata/roundtrip_creatures.json"),
+            "moves" => c.moves_json = format!("{TD}/testdata/roundtrip_moves.json"),
+            "map" => c.map_json = format!("{TD}/testdata/roundtrip_map.json"),
+            _ => unreachable!(),
+        }
+        c
+    }
+
+    /// Copy the fixture into the roundtrip path so the load half of the
+    /// round-trip reads the same data Go's setup produced.
+    fn seed_roundtrip(from: &str, to: &str) {
+        std::fs::copy(from, to).expect("seeding roundtrip fixture");
+    }
+
+    #[test]
+    fn roundtrip_creatures() {
+        seed_roundtrip(
+            CREATURES,
+            &roundtrip_cfg("creatures").creatures_json,
+        );
+        let c = roundtrip_cfg("creatures");
+        let s = Store::new(&c);
+        let orig = s.load_creatures().unwrap();
+        s.save_creatures(&orig).unwrap();
+        let reloaded = s.load_creatures().unwrap();
+        let a = serde_json::to_string_pretty(&orig).unwrap();
+        let b = serde_json::to_string_pretty(&reloaded).unwrap();
+        assert_eq!(a, b, "creatures round-trip mismatch");
+        assert_eq!(orig, reloaded);
+    }
+
+    #[test]
+    fn roundtrip_moves() {
+        seed_roundtrip(MOVES, &roundtrip_cfg("moves").moves_json);
+        let c = roundtrip_cfg("moves");
+        let s = Store::new(&c);
+        let orig = s.load_moves().unwrap();
+        s.save_moves(&orig).unwrap();
+        let reloaded = s.load_moves().unwrap();
+        assert_eq!(orig, reloaded, "moves round-trip mismatch");
+    }
+
+    #[test]
+    fn roundtrip_map() {
+        seed_roundtrip(MAP, &roundtrip_cfg("map").map_json);
+        let c = roundtrip_cfg("map");
+        let s = Store::new(&c);
+        let orig = s.load_map().unwrap();
+        s.save_map(&orig).unwrap();
+        let reloaded = s.load_map().unwrap();
+        assert_eq!(orig, reloaded, "map round-trip mismatch");
+    }
+
+    #[test]
+    fn load_missing_creatures_errors() {
+        let c = Config {
+            creatures_json: "/nonexistent/path.json".to_string(),
+            moves_json: "/nonexistent/moves.json".to_string(),
+            map_json: MAP.to_string(),
+            tileset_png: String::new(),
+            map_tileset_png: String::new(),
+            npc_tileset_png: String::new(),
+            output_dir: String::new(),
+        };
+        let s = Store::new(&c);
+        assert!(s.load_creatures().is_err(), "expected error");
+        assert!(s.load_moves().is_err(), "expected error");
+    }
+
+    #[test]
+    fn load_missing_map_errors() {
+        let c = Config {
+            creatures_json: CREATURES.to_string(),
+            moves_json: MOVES.to_string(),
+            map_json: "/nonexistent/map.json".to_string(),
+            tileset_png: String::new(),
+            map_tileset_png: String::new(),
+            npc_tileset_png: String::new(),
+            output_dir: String::new(),
+        };
+        let s = Store::new(&c);
+        assert!(s.load_map().is_err(), "expected error");
+    }
+
+    #[test]
+    fn save_pretty_indent_two() {
+        // Mirrors Go's MarshalIndent(x, "", "  "): 2-space indent.
+        // Distinct file from roundtrip_map so parallel tests don't race.
+        let mut c = roundtrip_cfg("map");
+        c.map_json = format!("{TD}/testdata/roundtrip_map_pretty.json");
+        seed_roundtrip(MAP, &c.map_json);
+        let s = Store::new(&c);
+        let m = s.load_map().unwrap();
+        s.save_map(&m).unwrap();
+        let text = std::fs::read_to_string(&c.map_json).unwrap();
+        assert!(text.contains("\n  \"width\":"), "expected 2-space indent");
+    }
+
+    #[test]
+    fn json_keys_match_go_tags() {
+        // Assert that the serialized JSON keys are exactly the Go struct tags,
+        // including the rename cases (evelevel/deff/spcatk/spcdef/moveList/...).
+        let c = Creature {
+            name: "N".to_string(),
+            id: 1,
+            type1: "wind".to_string(),
+            type2: "none".to_string(),
+            evo_level: 5,
+            atk: 1,
+            def: 2,
+            spc_atk: 3,
+            spc_def: 4,
+            hp: 5,
+            spd: 6,
+            move1: 0,
+            move2: 0,
+            move3: 0,
+            move4: 0,
+            move_list: vec![],
+        };
+        let v: serde_json::Value = serde_json::to_value(&c).unwrap();
+        let o = v.as_object().unwrap();
+        for key in [
+            "name", "id", "type1", "type2", "evelevel", "atk", "deff", "spcatk", "spcdef",
+            "hp", "spd", "move1", "move2", "move3", "move4", "moveList",
+        ] {
+            assert!(o.contains_key(key), "missing key {key}");
+        }
+        assert!(!o.contains_key("evo_level"));
+
+        let z = EncounterZone {
+            id: 1,
+            name: "z".to_string(),
+            rate: 50,
+            creature_ids: vec![1, 2],
+        };
+        let v: serde_json::Value = serde_json::to_value(&z).unwrap();
+        assert!(v.as_object().unwrap().contains_key("creature_ids"));
+
+        let n = NPCObject {
+            id: 1,
+            x: 0,
+            y: 0,
+            sprite_id: 9,
+            script: "s".to_string(),
+        };
+        let v: serde_json::Value = serde_json::to_value(&n).unwrap();
+        assert!(v.as_object().unwrap().contains_key("sprite_id"));
+    }
+}

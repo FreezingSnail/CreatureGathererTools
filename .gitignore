@@ -10,3 +10,5 @@
 /output
 # worker reports
 output.md
+# worker test artifacts
+crates/core/testdata/roundtrip_*.json

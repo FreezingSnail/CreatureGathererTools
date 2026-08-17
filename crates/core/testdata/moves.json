@@ -1,0 +1,20 @@
+[
+  {
+    "id": 0,
+    "name": "smite",
+    "type": "spirit",
+    "power": 10,
+    "physical": 0,
+    "accuracy": 100,
+    "effect": "NONE"
+  },
+  {
+    "id": 1,
+    "name": "thought",
+    "type": "spirit",
+    "power": 5,
+    "physical": 1,
+    "accuracy": 100,
+    "effect": "NONE"
+  }
+]

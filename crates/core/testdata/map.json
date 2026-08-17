@@ -1,0 +1,53 @@
+{
+  "width": 3,
+  "height": 2,
+  "tiles": [
+    [1, 2, 3],
+    [4, 5, 6]
+  ],
+  "npcs": [
+    {
+      "id": 1,
+      "x": 2,
+      "y": 1,
+      "sprite_id": 12,
+      "script": "shop"
+    }
+  ],
+  "scripts": [
+    {
+      "id": 1,
+      "x": 0,
+      "y": 0,
+      "script": "talk"
+    }
+  ],
+  "collision": [
+    [0, 0, 0],
+    [1, 0, 0]
+  ],
+  "collision_types": [
+    {
+      "id": 1,
+      "name": "wall",
+      "color": "#FF000080"
+    },
+    {
+      "id": 2,
+      "name": "water",
+      "color": "#0000FF80"
+    }
+  ],
+  "encounters": [
+    [1, -1, 1],
+    [-1, -1, 1]
+  ],
+  "encounter_zones": [
+    {
+      "id": 1,
+      "name": "grass",
+      "rate": 25,
+      "creature_ids": [0, 5]
+    }
+  ]
+}

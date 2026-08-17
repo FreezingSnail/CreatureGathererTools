@@ -1,0 +1,48 @@
+[
+  {
+    "name": "SquibbleSnail",
+    "id": 0,
+    "type1": "wind",
+    "type2": "none",
+    "evelevel": 8,
+    "atk": 3,
+    "deff": 3,
+    "spcatk": 2,
+    "spcdef": 2,
+    "hp": 3,
+    "spd": 3,
+    "move1": 8,
+    "move2": 32,
+    "move3": 32,
+    "move4": 32,
+    "moveList": [
+      {
+        "id": 1,
+        "name": "thought",
+        "type": "spirit",
+        "power": 5,
+        "physical": 1,
+        "accuracy": 100,
+        "effect": "NONE"
+      }
+    ]
+  },
+  {
+    "name": "NewOne",
+    "id": 99,
+    "type1": "none",
+    "type2": "none",
+    "evelevel": 1,
+    "atk": 1,
+    "deff": 1,
+    "spcatk": 1,
+    "spcdef": 1,
+    "hp": 1,
+    "spd": 1,
+    "move1": 0,
+    "move2": 0,
+    "move3": 0,
+    "move4": 0,
+    "moveList": []
+  }
+]
