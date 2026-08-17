@@ -12,3 +12,4 @@
 output.md
 # worker test artifacts
 crates/core/testdata/roundtrip_*.json
+crates/core/testdata/builder_out/

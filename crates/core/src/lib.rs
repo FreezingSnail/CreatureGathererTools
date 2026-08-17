@@ -1,9 +1,12 @@
+pub mod builder;
 pub mod cli;
 pub mod config;
 pub mod model;
 pub mod parser;
 pub mod processor;
+pub mod script;
 pub mod store;
+pub mod tiled;
 pub mod writer;
 use anyhow::Context;
 use clap::Parser;
