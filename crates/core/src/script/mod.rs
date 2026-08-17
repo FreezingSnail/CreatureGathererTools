@@ -602,6 +602,47 @@ mod tests {
     }
 
     #[test]
+    fn parity_cmd_tmsg_cords_bytes() {
+        // Go Command2Bytes: TMsg opcode 1 + Cords(u16 BE, u16 BE) + text index.
+        let cmd = Cmd::TMsg {
+            at: Location::Cords(10, 20),
+            text: txt(0, "Hello"),
+        };
+        assert_eq!(cmd.to_bytes(), vec![1, 0, 10, 0, 20, 0, 0]);
+    }
+
+    #[test]
+    fn parity_cmd_smsg_cords_bytes() {
+        // Go Command2Bytes: SMsg opcode 2 + Cords + text index.
+        let cmd = Cmd::SMsg {
+            selected: Location::Cords(3, 4),
+            text: txt(3, "Secret"),
+        };
+        assert_eq!(cmd.to_bytes(), vec![2, 0, 3, 0, 4, 0, 3]);
+    }
+
+    #[test]
+    fn parity_cmd_tp_cords_bytes() {
+        // Go Command2Bytes: Tp opcode 3 + Cords(u16 BE, u16 BE).
+        let cmd = Cmd::Tp {
+            to: Location::Cords(5, 6),
+        };
+        assert_eq!(cmd.to_bytes(), vec![3, 0, 5, 0, 6]);
+    }
+
+    #[test]
+    fn parity_cmd_unsetflag_bytes() {
+        let cmd = Cmd::UnsetFlag { flag: txt(5, "flag") };
+        assert_eq!(cmd.to_bytes(), vec![7, 0, 5]);
+    }
+
+    #[test]
+    fn parity_cmd_readflag_bytes() {
+        let cmd = Cmd::ReadFlag { flag: txt(5, "flag") };
+        assert_eq!(cmd.to_bytes(), vec![8, 0, 5]);
+    }
+
+    #[test]
     fn parity_cmd_tpif_cords_bytes() {
         let cmd = Cmd::TpIf {
             from: Location::Cords(1, 2),

@@ -1,0 +1,150 @@
+// App shell styling: header/tabs/status (additive to editors.css).
+
+.cgfx-app {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  font-family: system-ui, sans-serif;
+  background: #141414;
+  color: #ddd;
+}
+
+.cgfx-app__header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 10px;
+  border-bottom: 1px solid #333;
+  background: #222;
+  flex-wrap: wrap;
+}
+
+.cgfx-app__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #ddd;
+  white-space: nowrap;
+}
+
+.cgfx-app__tabs {
+  display: flex;
+  gap: 2px;
+}
+
+.cgfx-app__tab {
+  padding: 10px 14px;
+  border: none;
+  background: transparent;
+  color: #aaa;
+  font-size: 13px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+
+.cgfx-app__tab:hover {
+  color: #fff;
+}
+
+.cgfx-app__tab--active {
+  color: #fff;
+  border-bottom-color: #316dca;
+}
+
+.cgfx-app__actions {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
+
+.cgfx-app__actions button {
+  font-size: 12px;
+  padding: 4px 10px;
+  background: #2a2a2a;
+  color: #ddd;
+  border: 1px solid #444;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.cgfx-app__actions button:hover {
+  background: #333;
+}
+
+.cgfx-app__status {
+  padding: 4px 10px;
+  font-size: 12px;
+  color: #6f6;
+  background: #181818;
+  border-bottom: 1px solid #333;
+  min-height: 12px;
+}
+
+.cgfx-app__status--error {
+  color: #f66;
+}
+
+.cgfx-app__compile {
+  padding: 6px 10px;
+  font-size: 12px;
+  background: #181818;
+  border-bottom: 1px solid #333;
+  max-height: 140px;
+  overflow: auto;
+}
+
+.cgfx-app__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.cgfx-app__panel {
+  flex: 1;
+  min-height: 0;
+}
+
+/* setup dialog */
+.cgfx-setup {
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #141414;
+  font-family: system-ui, sans-serif;
+}
+
+.cgfx-setup__form {
+  width: 480px;
+  background: #1f1f1f;
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cgfx-setup__title {
+  font-size: 15px;
+  margin: 0;
+  color: #fff;
+}
+
+.cgfx-setup__hint {
+  font-size: 12px;
+  color: #888;
+  margin: 0;
+}
+
+.cgfx-setup__submit {
+  margin-top: 6px;
+  font-size: 13px;
+  padding: 6px 12px;
+  background: #316dca;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  align-self: flex-start;
+}

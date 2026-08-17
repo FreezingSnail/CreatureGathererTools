@@ -1,0 +1,228 @@
+import { describe, expect, it, vi, beforeEach } from "vitest";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { invoke } from "@tauri-apps/api/core";
+import App from "./App";
+import { emptyMap } from "./state";
+import type { Config } from "./types";
+import type { Creature, Move } from "./editorTypes";
+
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+
+const mockInvoke = vi.mocked(invoke) as unknown as ReturnType<typeof vi.fn>;
+
+const config: Config = {
+  creatures_json: "creatures.json",
+  moves_json: "moves.json",
+  map_json: "map.json",
+  tileset_png: "tileset.png",
+  map_tileset_png: "map_tileset.png",
+  npc_tileset_png: "npc_tileset.png",
+  output_dir: "out",
+};
+
+const map = emptyMap(8, 8);
+
+const creatures: Creature[] = [
+  {
+    name: "Floofer",
+    id: 1,
+    type1: "spirit",
+    type2: "none",
+    evelevel: 0,
+    atk: 10,
+    deff: 8,
+    spcatk: 6,
+    spcdef: 5,
+    hp: 30,
+    spd: 12,
+    move1: 0,
+    move2: 0,
+    move3: 0,
+    move4: 0,
+    moveList: [],
+  },
+];
+
+const moves: Move[] = [
+  { id: 1, name: "Tackle", type: "spirit", power: 40, physical: 1, accuracy: 100, effect: "NONE" },
+];
+
+function mockBoot() {
+  mockInvoke.mockImplementation((cmd: string) => {
+    switch (cmd) {
+      case "load_config":
+        return Promise.resolve(config);
+      case "load_map":
+        return Promise.resolve(map);
+      case "load_creatures":
+        return Promise.resolve(creatures);
+      case "load_moves":
+        return Promise.resolve(moves);
+      case "save_map":
+        return Promise.resolve(null);
+      case "compile_all":
+        return Promise.resolve({
+          ok: true,
+          errors: [],
+          artifacts: ["out/raw_map.bin", "out/creatures.bin", "out/moves.bin"],
+        });
+      case "read_file_bytes":
+        return Promise.reject(new Error("no tauri in tests"));
+      default:
+        return Promise.reject(new Error(`unexpected invoke: ${cmd}`));
+    }
+  });
+}
+
+beforeEach(() => {
+  mockInvoke.mockReset();
+});
+
+describe("App shell", () => {
+  it("shows setup dialog when config is missing and opens editors after saving", async () => {
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "load_config") return Promise.reject(new Error("missing creature-tools.json"));
+      if (cmd === "save_config") return Promise.resolve(null);
+      if (cmd === "load_map") return Promise.resolve(map);
+      return Promise.reject(new Error(`unexpected invoke: ${cmd}`));
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    expect(await screen.findByTestId("setup-dialog")).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("Creatures JSON"), "creatures.json");
+    await user.type(screen.getByLabelText("Moves JSON"), "moves.json");
+    await user.type(screen.getByLabelText("Map JSON"), "map.json");
+    await user.type(screen.getByLabelText("Map Tileset PNG"), "map_tileset.png");
+    await user.type(screen.getByLabelText("NPC Tileset PNG"), "npc_tileset.png");
+    await user.type(screen.getByLabelText("Output Dir"), "out");
+    await user.click(screen.getByRole("button", { name: "Create Config" }));
+
+    await waitFor(() =>
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "save_config",
+        expect.objectContaining({
+          config: expect.objectContaining({
+            creatures_json: "creatures.json",
+            moves_json: "moves.json",
+            map_json: "map.json",
+            map_tileset_png: "map_tileset.png",
+            npc_tileset_png: "npc_tileset.png",
+            output_dir: "out",
+            tileset_png: "",
+          }),
+        })
+      )
+    );
+    expect(await screen.findByRole("tab", { name: "Map" })).toBeInTheDocument();
+    expect(screen.getByTestId("tab-panel-map")).toBeInTheDocument();
+  });
+
+  it("shows a save failure error and keeps the setup dialog open", async () => {
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "load_config") return Promise.reject(new Error("missing creature-tools.json"));
+      if (cmd === "save_config") return Promise.reject(new Error("permission denied"));
+      return Promise.reject(new Error(`unexpected invoke: ${cmd}`));
+    });
+    render(<App />);
+    await screen.findByTestId("setup-dialog");
+    fireEvent.click(screen.getByRole("button", { name: "Create Config" }));
+    expect(await screen.findByTestId("setup-error")).toHaveTextContent(/save failed/i);
+    expect(screen.getByTestId("setup-dialog")).toBeInTheDocument();
+  });
+
+  it("renders editors directly when a config exists", async () => {
+    mockBoot();
+    render(<App />);
+    expect(await screen.findByRole("tab", { name: "Map" })).toBeInTheDocument();
+    expect(await screen.findByTestId("palette")).toBeInTheDocument();
+    expect(screen.getByTestId("tab-panel-creature")).toBeInTheDocument();
+    expect(screen.getByTestId("tab-panel-move")).toBeInTheDocument();
+    expect(screen.queryByTestId("setup-dialog")).not.toBeInTheDocument();
+  });
+
+  it("preserves creature editor state across tab switches", async () => {
+    mockBoot();
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole("tab", { name: "Map" });
+
+    await user.click(screen.getByRole("tab", { name: "Creature" }));
+    const creaturePanel = screen.getByTestId("tab-panel-creature");
+    await within(creaturePanel).findByText("Floofer");
+    await user.click(within(creaturePanel).getByText("Floofer"));
+    const name = within(creaturePanel).getByLabelText("Name") as HTMLInputElement;
+    await user.clear(name);
+    await user.type(name, "Floofer Prime");
+
+    await user.click(screen.getByRole("tab", { name: "Map" }));
+    expect(screen.getByTestId("tab-panel-map")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Creature" }));
+    const reloaded = screen.getByTestId("tab-panel-creature");
+    expect(within(reloaded).getByLabelText("Name")).toHaveValue("Floofer Prime");
+    // draft persists: the list button still shows the unsaved original name
+    expect(within(reloaded).getByText("Floofer")).toBeInTheDocument();
+  });
+
+  it("header Save map persists the map via save_map", async () => {
+    mockBoot();
+    render(<App />);
+    await screen.findByTestId("palette");
+    fireEvent.click(screen.getByRole("button", { name: "Save map" }));
+    await waitFor(() =>
+      expect(mockInvoke).toHaveBeenCalledWith("save_map", expect.objectContaining({ map: expect.anything() }))
+    );
+  });
+
+  it("header Compile all runs compile_all and surfaces artifacts", async () => {
+    mockBoot();
+    render(<App />);
+    await screen.findByTestId("palette");
+    fireEvent.click(screen.getByRole("button", { name: "Compile all" }));
+    const result = await screen.findByTestId("app-compile-result");
+    expect(result.textContent).toContain("raw_map.bin");
+    expect(result.textContent).toContain("moves.bin");
+  });
+
+  it("header Compile all surfaces compile errors", async () => {
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "load_config") return Promise.resolve(config);
+      if (cmd === "load_map") return Promise.resolve(map);
+      if (cmd === "load_creatures") return Promise.resolve(creatures);
+      if (cmd === "load_moves") return Promise.resolve(moves);
+      if (cmd === "compile_all")
+        return Promise.resolve({
+          ok: false,
+          errors: [
+            { line: 3, msg: "unknown command" },
+            { line: 8, msg: "bad flag" },
+          ],
+          artifacts: [],
+        });
+      if (cmd === "read_file_bytes") return Promise.reject(new Error("no tauri in tests"));
+      return Promise.reject(new Error(`unexpected invoke: ${cmd}`));
+    });
+    render(<App />);
+    await screen.findByTestId("palette");
+    fireEvent.click(screen.getByRole("button", { name: "Compile all" }));
+    const result = await screen.findByTestId("app-compile-result");
+    expect(result.textContent).toContain("line 3: unknown command");
+    expect(result.textContent).toContain("line 8: bad flag");
+  });
+
+  it("reload config re-runs load_config and returns to setup when config is gone", async () => {
+    mockBoot();
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByTestId("palette");
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "load_config") return Promise.reject(new Error("config removed"));
+      return Promise.reject(new Error(`unexpected invoke: ${cmd}`));
+    });
+    await user.click(screen.getByRole("button", { name: "Reload config" }));
+    expect(await screen.findByTestId("setup-dialog")).toBeInTheDocument();
+    expect(screen.getByTestId("setup-error")).toHaveTextContent(/config removed/i);
+  });
+});

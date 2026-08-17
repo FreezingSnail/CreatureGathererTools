@@ -2,7 +2,14 @@
 // editor + save/compile. Drives the Tauri command layer via injected async
 // functions so components stay testable outside the webview.
 
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useReducer,
+  useRef,
+  useState,
+  type MutableRefObject,
+} from "react";
 import type { Config, GameMap, ParseResult, CompileResult } from "./types";
 import {
   initialState,
@@ -31,11 +38,21 @@ interface EditorProps {
   config: Config;
   map: GameMap;
   deps: EditorDeps;
+  /** Gate global key handlers when the editor is hidden behind another tab. */
+  active?: boolean;
+  /** Shell can trigger the editor's own save (header Save map button). */
+  saveRef?: MutableRefObject<(() => void) | null>;
 }
 
 type PaletteTab = "map" | "npc" | "collision" | "encounter";
 
-export function MapEditor({ config, map, deps }: EditorProps) {
+export function MapEditor({
+  config,
+  map,
+  deps,
+  active = true,
+  saveRef,
+}: EditorProps) {
   const [state, dispatch] = useReducer(reducer, undefined, initialState);
   const [mapTiles, setMapTiles] = useState<Tileset>(emptyTileset);
   const [npcTiles, setNpcTiles] = useState<Tileset>(emptyTileset);
@@ -93,6 +110,9 @@ export function MapEditor({ config, map, deps }: EditorProps) {
         ? state.map.scripts[state.selectedScript].script
         : "";
   useEffect(() => {
+    if (!active) {
+      return;
+    }
     if (!selectedScriptKey) {
       return;
     }
@@ -102,10 +122,13 @@ export function MapEditor({ config, map, deps }: EditorProps) {
       });
     }, 400);
     return () => window.clearTimeout(handle);
-  }, [selectedScriptKey, selectedScriptText, deps]);
+  }, [selectedScriptKey, selectedScriptText, deps, active]);
 
   // keyboard shortcuts: Ctrl+Z undo, Ctrl+= zoom in, Ctrl+- zoom out, H highlight
   useEffect(() => {
+    if (!active) {
+      return;
+    }
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
         e.preventDefault();
@@ -122,7 +145,7 @@ export function MapEditor({ config, map, deps }: EditorProps) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [state.zoom]);
+  }, [state.zoom, active]);
 
   const setStatus = useCallback((msg: string) => {
     statusRef.current = msg;
@@ -137,6 +160,17 @@ export function MapEditor({ config, map, deps }: EditorProps) {
       setStatus(`save failed: ${String(err)}`);
     }
   }, [state.map, deps, setStatus]);
+
+  // Expose the editor's save through the shell-provided ref (header Save map).
+  useEffect(() => {
+    if (!saveRef) {
+      return;
+    }
+    saveRef.current = save;
+    return () => {
+      saveRef.current = null;
+    };
+  }, [save, saveRef]);
 
   const compile = useCallback(async () => {
     setStatus("compiling…");
