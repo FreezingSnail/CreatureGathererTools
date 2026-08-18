@@ -36,6 +36,7 @@ describe("MapEditor", () => {
     expect(screen.getByText("Compile")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "undo" })).toBeInTheDocument();
     expect(screen.getByTestId("palette")).toBeInTheDocument();
+    expect(screen.getByTestId("zoom-sensitivity")).toBeInTheDocument();
     expect(document.querySelector("canvas")).toBeInTheDocument();
   });
 
@@ -64,5 +65,19 @@ describe("MapEditor", () => {
     fireEvent.click(screen.getByText("Compile"));
     const result = await screen.findByTestId("compile-result");
     expect(result.textContent).toContain("raw_map.bin");
+  });
+
+  it("sidebar resizer drag changes panel width", () => {
+    const { container } = render(
+      <MapEditor config={config} map={emptyMap(16, 16)} deps={deps()} />
+    );
+    const resizer = screen.getByTestId("sidebar-resizer");
+    const sidebar = container.querySelector(".border-r")!;
+    const before = (sidebar as HTMLElement).style.width;
+    fireEvent.mouseDown(resizer, { clientX: 100 });
+    fireEvent.mouseMove(window, { clientX: 300 });
+    fireEvent.mouseUp(window);
+    const after = (sidebar as HTMLElement).style.width;
+    expect(after).not.toBe(before);
   });
 });

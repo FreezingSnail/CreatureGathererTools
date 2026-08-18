@@ -1,7 +1,7 @@
 // Tile palette: a scrollable grid of tilesets. Shift-click drag-selects a
 // row-major rectangle (Go buildPalette parity). Uses toDataURL so jsdom-safe.
 
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { selectRect } from "./geometry";
@@ -11,15 +11,22 @@ export interface PaletteProps {
   perRow: number;
   selected: number[];
   emptyLabel?: string;
+  /** Fixed tile width in px. Computed from panel width by the parent so the
+   * grid doesn't reflow every pixel during panel resize. */
+  tilePx?: number;
+  /** Pinch-zoom sensitivity coefficient (higher = snappier). */
+  sensitivity?: number;
   onSelectBlock: (block: number[], w: number, h: number) => void;
 }
 
 function TileButton({
   canvas,
+  index,
   isSelected,
   onTap,
 }: {
   canvas: HTMLCanvasElement;
+  index: number;
   isSelected: boolean;
   onTap: (shift: boolean) => void;
 }) {
@@ -34,10 +41,10 @@ function TileButton({
     <Button
       type="button"
       variant="ghost"
-      title={`tile ${canvas.width}x${canvas.height}`}
+      title={`tile ${index}: ${canvas.width}x${canvas.height}`}
       onClick={(e) => onTap(e.shiftKey)}
       className={cn(
-        "size-8 shrink-0 overflow-hidden rounded-sm border p-0",
+        "relative aspect-square h-auto w-full shrink-0 overflow-hidden rounded-sm border p-0",
         isSelected
           ? "border-2 border-yellow-400 outline outline-1 outline-black"
           : "border-neutral-700 hover:border-neutral-500"
@@ -48,7 +55,14 @@ function TileButton({
         imageRendering: "pixelated",
       }}
       data-testid="palette-tile"
-    />
+    >
+      <span
+        className="pointer-events-none absolute left-0 top-0 z-10 bg-blue-500/60 px-0.5 text-[9px] font-semibold leading-tight text-white"
+        data-testid="palette-tile-index"
+      >
+        {index}
+      </span>
+    </Button>
   );
 }
 
@@ -57,10 +71,41 @@ export function Palette({
   perRow,
   selected,
   emptyLabel = "No tileset loaded",
+  tilePx = 48,
+  sensitivity = 0.006,
   onSelectBlock,
 }: PaletteProps) {
   const anchorRef = useRef(0);
+  const gridRef = useRef<HTMLDivElement | null>(null);
+  // Zoom lives in a ref and mutates the DOM directly: wheel events fire many
+  // times per frame during a trackpad pinch, and React re-rendering the whole
+  // grid per tick is what makes pinch lag.
+  const zoomRef = useRef(1);
   const selectedSet = useMemo(() => new Set(selected), [selected]);
+  const hasTiles = tiles.length > 0;
+
+  // Pinch zoom: trackpads emit ctrl+wheel. Native listener so we can
+  // preventDefault; plain wheel keeps default scroll behavior. Apply
+  // synchronously for snappy feel — the browser coalesces layout at paint, so
+  // multiple wheel ticks per frame still cost one layout.
+  useEffect(() => {
+    if (!hasTiles) return;
+    const el = gridRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      // deltaY magnitude drives zoom (deltaMode-normalized): trackpad pinches
+      // emit many tiny deltas, so a fixed per-event step over-zooms.
+      const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 100 : 1;
+      const factor = Math.exp(-e.deltaY * unit * sensitivity);
+      zoomRef.current = Math.min(Math.max(zoomRef.current * factor, 0.5), 4);
+      el.style.zoom = String(zoomRef.current);
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasTiles, sensitivity]);
 
   if (tiles.length === 0) {
     return (
@@ -85,11 +130,14 @@ export function Palette({
 
   return (
     <div
+      ref={gridRef}
       style={{
         overflow: "auto",
-        maxHeight: 420,
+        maxHeight: "none",
+        width: "100%",
+        zoom: zoomRef.current,
         display: "grid",
-        gridTemplateColumns: `repeat(${cols}, 32px)`,
+        gridTemplateColumns: `repeat(${cols}, ${tilePx}px)`,
         gap: 2,
         padding: 4,
       }}
@@ -99,6 +147,7 @@ export function Palette({
         <TileButton
           key={i}
           canvas={t}
+          index={i}
           isSelected={selectedSet.has(i)}
           onTap={(shift) => tap(i, shift)}
         />

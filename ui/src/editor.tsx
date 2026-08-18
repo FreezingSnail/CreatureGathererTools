@@ -8,6 +8,7 @@ import {
   useReducer,
   useRef,
   useState,
+  type MouseEvent as ReactMouseEvent,
   type MutableRefObject,
 } from "react";
 import type { Config, GameMap, ParseResult, CompileResult } from "./types";
@@ -58,6 +59,16 @@ export function MapEditor({
   const [mapTiles, setMapTiles] = useState<Tileset>(emptyTileset);
   const [npcTiles, setNpcTiles] = useState<Tileset>(emptyTileset);
   const [paletteTab, setPaletteTab] = useState<PaletteTab>("map");
+  const [sidebarW, setSidebarW] = useState<number | null>(null);
+  const [zoomSens, setZoomSens] = useState<number>(() => {
+    try {
+      const v = Number(localStorage.getItem("cgfx.paletteZoomSensitivity"));
+      return Number.isFinite(v) && v > 0 ? v : 0.006;
+    } catch {
+      return 0.006;
+    }
+  });
+  const sidebarRef = useRef<HTMLDivElement | null>(null);
   const statusRef = useRef("");
 
   // load the map (once)
@@ -188,6 +199,24 @@ export function MapEditor({
   const selectedScripts =
     state.selectedScript >= 0 ? [state.map.scripts[state.selectedScript]] : [];
 
+  // Tile grid fills the panel width (1fr columns); size the sidebar to fit a
+  // full sheet row by default, or keep the user's dragged width.
+  const palettePerRow =
+    paletteTab === "map" ? mapTiles.perRow : paletteTab === "npc" ? npcTiles.perRow : 0;
+  const defaultFit = Math.min(Math.max(230, palettePerRow * 50 + 24), 640);
+  const sidebarWidth = Math.min(Math.max(sidebarW ?? defaultFit, 160), 960);
+  const widthRef = useRef(sidebarWidth);
+  widthRef.current = sidebarWidth;
+
+  // Fixed tile px for the active palette, derived from the current panel
+  // width. Recomputed only on re-render (i.e. mouseup), so dragging the panel
+  // doesn't reflow every tile each frame.
+  const paletteTilePx = (perRow: number) => {
+    const cols = Math.max(1, perRow);
+    const avail = sidebarWidth - 8 - (cols - 1) * 2;
+    return Math.max(20, Math.floor(avail / cols));
+  };
+
   const toggle = (label: string, checked: boolean, onChange: () => void) => (
     <label style={{ fontSize: 12, display: "inline-flex", alignItems: "center", gap: 3 }}>
       <input type="checkbox" checked={checked} onChange={onChange} />
@@ -195,13 +224,41 @@ export function MapEditor({
     </label>
   );
 
+  const startResize = (e: ReactMouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = widthRef.current;
+    const onMove = (ev: MouseEvent) => {
+      const w = Math.min(Math.max(startW + ev.clientX - startX, 160), 960);
+      // Mutate the DOM directly during drag: React re-render per mousemove
+      // rebuilds the canvas tree and causes flicker/stall.
+      widthRef.current = w;
+      if (sidebarRef.current) {
+        sidebarRef.current.style.width = `${w}px`;
+      }
+    };
+    const onUp = (ev: MouseEvent) => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      const w = Math.min(Math.max(startW + ev.clientX - startX, 160), 960);
+      setSidebarW(w);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  };
+
   return (
     <div style={{ display: "flex", height: "100%", fontFamily: "system-ui, sans-serif" }}>
       {/* sidebar */}
       <div
+        ref={sidebarRef}
         className="border-r border-neutral-800 bg-neutral-900"
         style={{
-          width: 230,
+          width: sidebarWidth,
           display: "flex",
           flexDirection: "column",
         }}
@@ -227,6 +284,8 @@ export function MapEditor({
             <Palette
               tiles={mapTiles.tiles}
               perRow={mapTiles.perRow}
+              tilePx={paletteTilePx(mapTiles.perRow)}
+              sensitivity={zoomSens}
               selected={state.activeBlock}
               onSelectBlock={(block, w, h) =>
                 dispatch({ type: "SET_ACTIVE_BLOCK", block, w, h })
@@ -238,6 +297,8 @@ export function MapEditor({
             <Palette
               tiles={npcTiles.tiles}
               perRow={npcTiles.perRow}
+              tilePx={paletteTilePx(npcTiles.perRow)}
+              sensitivity={zoomSens}
               selected={[state.activeNpcSprite]}
               onSelectBlock={(block) =>
                 dispatch({ type: "SET_NPC_SPRITE", sprite: block[0] ?? 0 })
@@ -326,10 +387,41 @@ export function MapEditor({
           className="border-t border-neutral-800 text-muted-foreground"
           style={{ padding: 6, fontSize: 11 }}
         >
-          wheel: zoom · shift+wheel: pan · drag: paint · alt/middle-drag: pan ·
-          right-click: delete/clear · ctrl+z: undo
+          <label className="mb-1 flex items-center justify-between gap-2">
+            <span>Pinch zoom sensitivity</span>
+            <span className="tabular-nums">{zoomSens.toFixed(3)}</span>
+          </label>
+          <input
+            type="range"
+            min={0.001}
+            max={0.02}
+            step={0.001}
+            value={zoomSens}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              setZoomSens(v);
+              try {
+                localStorage.setItem("cgfx.paletteZoomSensitivity", String(v));
+              } catch {
+                // ignore storage failures (tests / restricted webview)
+              }
+            }}
+            className="w-full"
+            data-testid="zoom-sensitivity"
+          />
+          <div className="mt-1">
+            wheel: zoom · shift+wheel: pan · drag: paint · alt/middle-drag: pan ·
+            right-click: delete/clear · ctrl+z: undo
+          </div>
         </div>
       </div>
+
+      {/* drag handle to resize the palette panel */}
+      <div
+        className="w-1.5 shrink-0 cursor-col-resize bg-neutral-700 hover:bg-neutral-500"
+        onMouseDown={startResize}
+        data-testid="sidebar-resizer"
+      />
 
       {/* main column */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>

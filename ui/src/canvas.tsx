@@ -2,7 +2,7 @@
 // zoom/pan, tile+block brush, 5 layers, ghost preview, chunk grid overlay,
 // selection outlines, coordinate labels.
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { GameMap } from "./types";
 import type { LayerType } from "./state";
 import {
@@ -125,27 +125,14 @@ export function MapCanvas(props: MapCanvasProps) {
     visible: false,
   });
 
-  // canvas sizing + draw
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) {
-      return;
-    }
-    const resize = () => {
-      const canvas = canvasRef.current;
-      if (!canvas) {
-        return;
-      }
-      canvas.width = container.clientWidth;
-      canvas.height = container.clientHeight;
-    };
-    resize();
-    const ro = new ResizeObserver(resize);
-    ro.observe(container);
-    return () => ro.disconnect();
-  }, []);
+  // Latest props/ghost via refs so the resize path can redraw without
+  // re-registering observers on every state change.
+  const propsRef = useRef(props);
+  propsRef.current = props;
+  const ghostRef = useRef(ghost);
+  ghostRef.current = ghost;
 
-  useEffect(() => {
+  const drawCanvas = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) {
       return;
@@ -154,14 +141,65 @@ export function MapCanvas(props: MapCanvasProps) {
     if (!ctx) {
       return; // jsdom-safe
     }
-    drawFrame(
-      ctx,
-      canvas.width,
-      canvas.height,
-      props,
-      ghost
-    );
+    drawFrame(ctx, canvas.width, canvas.height, propsRef.current, ghostRef.current);
+  }, []);
+
+  // canvas sizing + draw. Setting width/height wipes the buffer, so redraw or
+// the map vanishes. During rapid resize (palette panel drag) don't redraw
+// every tick: cheaply CSS-scale the existing bitmap (no wipe, GPU smooth),
+// then do one crisp full redraw ~80ms after resize settles.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+    let raf = 0;
+    let debounce: ReturnType<typeof setTimeout> | undefined;
+    const redraw = () => {
+      raf = 0;
+      const canvas = canvasRef.current;
+      if (!canvas) {
+        return;
+      }
+      canvas.width = container.clientWidth;
+      canvas.height = container.clientHeight;
+      drawCanvas();
+    };
+    const scheduleRedraw = () => {
+      if (raf) {
+        return;
+      }
+      raf = requestAnimationFrame(redraw);
+    };
+    const onResize = () => {
+      const canvas = canvasRef.current;
+      if (!canvas) {
+        return;
+      }
+      canvas.style.width = `${container.clientWidth}px`;
+      canvas.style.height = `${container.clientHeight}px`;
+      clearTimeout(debounce);
+      debounce = setTimeout(scheduleRedraw, 80);
+    };
+    onResize();
+    if (typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const ro = new ResizeObserver(onResize);
+    ro.observe(container);
+    return () => {
+      ro.disconnect();
+      if (raf) {
+        cancelAnimationFrame(raf);
+      }
+      clearTimeout(debounce);
+    };
+  }, [drawCanvas]);
+
+  useEffect(() => {
+    drawCanvas();
   }, [
+    drawCanvas,
     props.map,
     props.tiles,
     props.npcTiles,
