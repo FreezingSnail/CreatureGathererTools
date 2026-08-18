@@ -161,7 +161,10 @@ export function MoveEditor({ api = defaultApi }: { api?: MoveApi }) {
   if (!loaded) return <div data-testid="move-loading">loading moves…</div>;
 
   return (
-    <div className="flex items-start gap-4 p-4" data-testid="move-editor">
+    <div
+      className="flex h-full items-start gap-4 overflow-auto p-4"
+      data-testid="move-editor"
+    >
       <Card className="w-60 shrink-0">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">

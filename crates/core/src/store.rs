@@ -219,6 +219,38 @@ mod tests {
         assert!(s.load_moves().is_err(), "expected error");
     }
 
+    /// Go parity: `json.Unmarshal` tolerates a map JSON that omits the
+    /// collision/encounter grids (e.g. the hand-authored tools_dev_map.json);
+    /// serde must do the same instead of erroring on missing fields.
+    #[test]
+    fn load_partial_map_defaults_missing_grids() {
+        let partial = format!(
+            "{TD}/testdata/roundtrip_partial_map.json"
+        );
+        std::fs::write(
+            &partial,
+            r#"{"width":16,"height":16,"tiles":[],"npcs":[],"scripts":[]}"#,
+        )
+        .expect("write partial map");
+        let c = Config {
+            creatures_json: CREATURES.to_string(),
+            moves_json: MOVES.to_string(),
+            map_json: partial,
+            tileset_png: String::new(),
+            map_tileset_png: String::new(),
+            npc_tileset_png: String::new(),
+            output_dir: String::new(),
+        };
+        let s = Store::new(&c);
+        let m = s.load_map().expect("partial map must load like Go");
+        assert_eq!(m.width, 16);
+        assert_eq!(m.height, 16);
+        assert!(m.collision.is_empty());
+        assert!(m.collision_types.is_empty());
+        assert!(m.encounters.is_empty());
+        assert!(m.encounter_zones.is_empty());
+    }
+
     #[test]
     fn load_missing_map_errors() {
         let c = Config {

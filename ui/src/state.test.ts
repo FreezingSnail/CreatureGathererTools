@@ -189,6 +189,48 @@ describe("view + flags", () => {
   });
 });
 
+describe("tool switching", () => {
+  it("defaults to pan and switches via SET_TOOL", () => {
+    expect(initialState().tool).toBe("pan");
+    let s = reducer(initialState(), { type: "SET_TOOL", tool: "paint" });
+    expect(s.tool).toBe("paint");
+    s = reducer(s, { type: "SET_TOOL", tool: "pan" });
+    expect(s.tool).toBe("pan");
+  });
+});
+
+describe("script editing open/close", () => {
+  it("single click selects without opening the editor", () => {
+    let s = initialState();
+    s = reducer(s, { type: "SET_MAP", map: emptyMap(8, 8) });
+    s = reducer(s, { type: "CLICK_SCRIPT", col: 1, row: 1 });
+    expect(s.selectedScript).toBe(0);
+    expect(s.editingScript).toBe(-1);
+  });
+
+  it("OPEN_SCRIPT opens the editor and closes with id -1", () => {
+    let s = initialState();
+    s = reducer(s, { type: "SET_MAP", map: emptyMap(8, 8) });
+    s = reducer(s, { type: "CLICK_SCRIPT", col: 1, row: 1 });
+    s = reducer(s, { type: "OPEN_SCRIPT", id: 0 });
+    expect(s.editingScript).toBe(0);
+    expect(s.selectedScript).toBe(0);
+    s = reducer(s, { type: "OPEN_SCRIPT", id: -1 });
+    expect(s.editingScript).toBe(-1);
+    expect(s.selectedScript).toBe(0); // highlight stays
+  });
+
+  it("clicking another script closes the editor on the old one", () => {
+    let s = initialState();
+    s = reducer(s, { type: "SET_MAP", map: emptyMap(8, 8) });
+    s = reducer(s, { type: "CLICK_SCRIPT", col: 1, row: 1 });
+    s = reducer(s, { type: "OPEN_SCRIPT", id: 0 });
+    s = reducer(s, { type: "CLICK_SCRIPT", col: 3, row: 3 });
+    expect(s.selectedScript).toBe(1);
+    expect(s.editingScript).toBe(-1);
+  });
+});
+
 describe("normalizeMap", () => {
   it("fills missing grids for a minimal map", () => {
     const bare = { width: 3, height: 2 } as unknown as GameMap;

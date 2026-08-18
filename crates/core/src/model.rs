@@ -195,10 +195,18 @@ pub struct GameMap {
     pub npcs: Vec<NPCObject>,
     pub scripts: Vec<ScriptObject>,
     /// 0 = none, else CollisionType.ID
+    ///
+    /// `#[serde(default)]` matches Go's lenient `json.Unmarshal`: hand-authored
+    /// maps (e.g. tools_dev_map.json) omit collision/encounter grids and load
+    /// with zero values instead of erroring.
+    #[serde(default)]
     pub collision: Vec<Vec<u8>>,
     /// user-defined types
+    #[serde(default)]
     pub collision_types: Vec<CollisionType>,
     /// -1 = none, else EncounterZone.ID
+    #[serde(default)]
     pub encounters: Vec<Vec<i32>>,
+    #[serde(default)]
     pub encounter_zones: Vec<EncounterZone>,
 }

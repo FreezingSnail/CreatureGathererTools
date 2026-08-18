@@ -66,7 +66,9 @@ async function renderEditor() {
 describe("CreatureEditor", () => {
   it("loads and lists creatures", async () => {
     await renderEditor();
-    expect(screen.getByTestId("creature-editor")).toBeInTheDocument();
+    const root = screen.getByTestId("creature-editor");
+    expect(root).toBeInTheDocument();
+    expect(root).toHaveClass("h-full", "overflow-auto");
     expect(screen.getByText("Floofer")).toBeInTheDocument();
     expect(screen.getByText("Burnling")).toBeInTheDocument();
   });

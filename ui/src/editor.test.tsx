@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MapEditor, type EditorDeps } from "./editor";
 import { emptyMap } from "./state";
 
@@ -53,11 +53,46 @@ describe("MapEditor", () => {
     );
     expect(container.querySelector('[data-testid="script-textarea"]')).toBeNull();
 
-    // switch to NPC layer, then click the canvas at a tile coordinate
+    // switch to NPC layer and paint tool, then click the canvas at a tile coordinate
+    fireEvent.keyDown(window, { key: "p" });
     fireEvent.change(screen.getByDisplayValue("map"), { target: { value: "npc" } });
     const canvas = container.querySelector("canvas")!;
     fireEvent.mouseDown(canvas, { clientX: 60, clientY: 60, button: 0 });
+    fireEvent.mouseUp(canvas);
     expect(screen.getByTestId("script-textarea")).toBeInTheDocument();
+  });
+
+  it("saves without empty-script placeholders", async () => {
+    const saved: unknown[] = [];
+    const d = deps();
+    d.saveMap = async (m) => {
+      saved.push(m);
+    };
+    const { container } = render(
+      <MapEditor config={config} map={emptyMap(16, 16)} deps={d} />
+    );
+    fireEvent.keyDown(window, { key: "p" });
+    fireEvent.change(screen.getByDisplayValue("map"), { target: { value: "script" } });
+    const canvas = container.querySelector("canvas")!;
+    fireEvent.mouseDown(canvas, { clientX: 60, clientY: 60, button: 0 });
+    fireEvent.mouseUp(canvas);
+    fireEvent.click(screen.getByText("Save"));
+    await waitFor(() => expect(saved).toHaveLength(1));
+    expect((saved[0] as { scripts: unknown[] }).scripts).toHaveLength(0);
+  });
+
+  it("left-drag pans instead of placing an NPC", async () => {
+    const { container } = render(
+      <MapEditor config={config} map={emptyMap(16, 16)} deps={deps()} />
+    );
+    const canvas = container.querySelector("canvas")!;
+    fireEvent.change(screen.getByDisplayValue("map"), { target: { value: "npc" } });
+    fireEvent.mouseDown(canvas, { clientX: 60, clientY: 60, button: 0 });
+    fireEvent.mouseMove(canvas, { clientX: 100, clientY: 60 });
+    fireEvent.mouseMove(canvas, { clientX: 140, clientY: 60 });
+    fireEvent.mouseUp(canvas);
+    // drag beyond threshold pans; no click action fires (no NPC placed)
+    expect(container.querySelector('[data-testid="script-textarea"]')).toBeNull();
   });
 
   it("compile button surfaces results", async () => {
@@ -65,6 +100,50 @@ describe("MapEditor", () => {
     fireEvent.click(screen.getByText("Compile"));
     const result = await screen.findByTestId("compile-result");
     expect(result.textContent).toContain("raw_map.bin");
+  });
+
+  it("pan is default and p/g keybinds switch the active tool", () => {
+    render(<MapEditor config={config} map={emptyMap(8, 8)} deps={deps()} />);
+    const paintBtn = screen.getByRole("button", { name: "paint" });
+    const panBtn = screen.getByRole("button", { name: "pan" });
+    expect(paintBtn).toHaveAttribute("aria-pressed", "false");
+    expect(panBtn).toHaveAttribute("aria-pressed", "true");
+    fireEvent.keyDown(window, { key: "p" });
+    expect(paintBtn).toHaveAttribute("aria-pressed", "true");
+    expect(panBtn).toHaveAttribute("aria-pressed", "false");
+    fireEvent.keyDown(window, { key: "g" });
+    expect(panBtn).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("pan tool click does not paint or place objects", () => {
+    const { container } = render(
+      <MapEditor config={config} map={emptyMap(16, 16)} deps={deps()} />
+    );
+    fireEvent.change(screen.getByDisplayValue("map"), { target: { value: "npc" } });
+    const canvas = container.querySelector("canvas")!;
+    fireEvent.mouseDown(canvas, { clientX: 60, clientY: 60, button: 0 });
+    fireEvent.mouseUp(canvas);
+    expect(container.querySelector('[data-testid="script-textarea"]')).toBeNull();
+  });
+
+  it("script layer: single click selects, double click opens editor, esc closes", () => {
+    const { container } = render(
+      <MapEditor config={config} map={emptyMap(16, 16)} deps={deps()} />
+    );
+    fireEvent.change(screen.getByDisplayValue("map"), { target: { value: "script" } });
+    const canvas = container.querySelector("canvas")!;
+    // switch to paint so the click places a script object
+    fireEvent.keyDown(window, { key: "p" });
+    // single click creates + selects only
+    fireEvent.mouseDown(canvas, { clientX: 60, clientY: 60, button: 0 });
+    fireEvent.mouseUp(canvas);
+    expect(container.querySelector('[data-testid="script-textarea"]')).toBeNull();
+    // double click opens the inline editor
+    fireEvent.dblClick(canvas, { clientX: 60, clientY: 60 });
+    expect(screen.getByTestId("script-textarea")).toBeInTheDocument();
+    // esc closes it
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(container.querySelector('[data-testid="script-textarea"]')).toBeNull();
   });
 
   it("sidebar resizer drag changes panel width", () => {

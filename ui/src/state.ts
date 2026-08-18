@@ -11,6 +11,9 @@ import {
 
 export type LayerType = "map" | "npc" | "script" | "collision" | "encounter";
 
+/** Canvas interaction tools. */
+export type EditorTool = "paint" | "pan";
+
 export const LAYERS: LayerType[] = [
   "map",
   "npc",
@@ -26,6 +29,7 @@ const EMPTY_SELECTION = -1;
 export interface EditorState {
   map: GameMap;
   // tool settings
+  tool: EditorTool;
   layer: LayerType;
   activeTile: number;
   activeBlock: number[];
@@ -38,6 +42,8 @@ export interface EditorState {
   // selections
   selectedNpc: number;
   selectedScript: number;
+  /** Script layer: id currently open in the inline editor (-1 = closed). */
+  editingScript: number;
   // view
   zoom: number;
   offsetX: number;
@@ -108,6 +114,7 @@ export function emptyMap(width = 256, height = 256): GameMap {
 export function initialState(): EditorState {
   return {
     map: emptyMap(),
+    tool: "pan",
     layer: "map",
     activeTile: 0,
     activeBlock: [0],
@@ -119,6 +126,7 @@ export function initialState(): EditorState {
     activeEncounterZone: 0,
     selectedNpc: EMPTY_SELECTION,
     selectedScript: EMPTY_SELECTION,
+    editingScript: EMPTY_SELECTION,
     zoom: 2,
     offsetX: 0,
     offsetY: 0,
@@ -138,6 +146,7 @@ export function initialState(): EditorState {
 
 export type Action =
   | { type: "SET_MAP"; map: GameMap }
+  | { type: "SET_TOOL"; tool: EditorTool }
   | { type: "SET_LAYER"; layer: LayerType }
   | { type: "SET_ACTIVE_TILE"; tile: number }
   | { type: "SET_ACTIVE_BLOCK"; block: number[]; w: number; h: number }
@@ -160,6 +169,7 @@ export type Action =
   | { type: "PAINT_ENCOUNTER"; col: number; row: number }
   | { type: "CLICK_NPC"; col: number; row: number }
   | { type: "CLICK_SCRIPT"; col: number; row: number }
+  | { type: "OPEN_SCRIPT"; id: number }
   | { type: "RIGHT_CLICK"; col: number; row: number }
   | { type: "SET_SCRIPT_TEXT"; target: "npc" | "script"; id: number; text: string }
   | { type: "SET_PARSE_RESULT"; key: string; result: ParseResult }
@@ -188,6 +198,9 @@ export function reducer(state: EditorState, action: Action): EditorState {
   switch (action.type) {
     case "SET_MAP":
       return { ...initialState(), map: normalizeMap(action.map) };
+
+    case "SET_TOOL":
+      return { ...state, tool: action.tool };
 
     case "SET_LAYER":
       return { ...state, layer: action.layer };
@@ -330,7 +343,8 @@ export function reducer(state: EditorState, action: Action): EditorState {
         (s) => s.x === action.col && s.y === action.row
       );
       if (idx >= 0) {
-        return { ...state, selectedScript: idx };
+        // single click selects only; editor opens on double-click
+        return { ...state, selectedScript: idx, editingScript: EMPTY_SELECTION };
       }
       const scripts = [
         ...state.map.scripts,
@@ -340,7 +354,18 @@ export function reducer(state: EditorState, action: Action): EditorState {
         ...state,
         map: { ...state.map, scripts },
         selectedScript: scripts.length - 1,
+        editingScript: EMPTY_SELECTION,
       };
+    }
+
+    case "OPEN_SCRIPT": {
+      if (action.id < 0) {
+        return { ...state, editingScript: EMPTY_SELECTION };
+      }
+      if (!state.map.scripts[action.id]) {
+        return state;
+      }
+      return { ...state, selectedScript: action.id, editingScript: action.id };
     }
 
     case "RIGHT_CLICK": {
@@ -366,6 +391,7 @@ export function reducer(state: EditorState, action: Action): EditorState {
             ...state,
             map: { ...state.map, scripts },
             selectedScript: EMPTY_SELECTION,
+            editingScript: EMPTY_SELECTION,
           };
         }
         case "collision": {

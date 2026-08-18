@@ -4,7 +4,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { GameMap } from "./types";
-import type { LayerType } from "./state";
+import type { LayerType, EditorTool } from "./state";
 import {
   TILE_SIZE,
   MARGIN_X,
@@ -22,6 +22,7 @@ export interface MapCanvasProps {
   tiles: HTMLCanvasElement[];
   npcTiles: HTMLCanvasElement[];
   layer: LayerType;
+  tool: EditorTool;
   zoom: number;
   offsetX: number;
   offsetY: number;
@@ -44,6 +45,7 @@ export interface MapCanvasProps {
   onPaintEncounter: (col: number, row: number) => void;
   onClickNpc: (col: number, row: number) => void;
   onClickScript: (col: number, row: number) => void;
+  onOpenScript: (id: number) => void;
   onRightClick: (col: number, row: number) => void;
 }
 
@@ -115,6 +117,8 @@ function drawLabel(
 }
 
 const GRID_COLOR = "rgba(40,40,40,0.47)";
+/** Pixels of travel before a left-drag becomes a pan instead of a click. */
+const DRAG_THRESHOLD = 4;
 
 export function MapCanvas(props: MapCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -226,10 +230,13 @@ export function MapCanvas(props: MapCanvasProps) {
     offsetX: props.offsetX,
     offsetY: props.offsetY,
   };
-  const startRef = useRef<{ x: number; y: number; ox: number; oy: number } | null>(
-    null
-  );
-  const paintingRef = useRef(false);
+  const startRef = useRef<{
+    x: number;
+    y: number;
+    ox: number;
+    oy: number;
+    pending: { col: number; row: number } | null;
+  } | null>(null);
   const panningRef = useRef(false);
 
   const toTile = (px: number, py: number) =>
@@ -251,6 +258,26 @@ export function MapCanvas(props: MapCanvasProps) {
     }
   };
 
+  /** Execute a click after mouseup if the pointer didn't travel (drag = pan). */
+  const clickAt = (col: number, row: number) => {
+    switch (props.layer) {
+      case "map":
+      case "collision":
+      case "encounter":
+        props.onPushUndo();
+        paintAt(col, row);
+        break;
+      case "npc":
+        props.onClickNpc(col, row);
+        break;
+      case "script":
+        props.onClickScript(col, row);
+        break;
+      default:
+        break;
+    }
+  };
+
   const handleMouseDown = (e: React.MouseEvent) => {
     if (e.button === 2) {
       return; // handled by contextmenu
@@ -263,26 +290,16 @@ export function MapCanvas(props: MapCanvasProps) {
     const y = e.clientY - rect.top;
     const middlePan = e.button === 1;
     const altPan = e.altKey;
-    if (middlePan || altPan) {
+    const panTool = props.tool === "pan";
+    if (middlePan || altPan || panTool) {
       e.preventDefault();
       panningRef.current = true;
-      startRef.current = { x, y, ox: props.offsetX, oy: props.offsetY };
+      startRef.current = { x, y, ox: props.offsetX, oy: props.offsetY, pending: null };
       return;
     }
-    // left click: NPC/script click (single), brush paint otherwise
+    // left click: defer action to mouseup so a drag can pan instead
     const { col, row } = toTile(x, y);
-    if (props.layer === "npc") {
-      props.onClickNpc(col, row);
-      return;
-    }
-    if (props.layer === "script") {
-      props.onClickScript(col, row);
-      return;
-    }
-    paintingRef.current = true;
-    props.onPushUndo();
-    paintAt(col, row);
-    startRef.current = { x, y, ox: props.offsetX, oy: props.offsetY };
+    startRef.current = { x, y, ox: props.offsetX, oy: props.offsetY, pending: { col, row } };
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
@@ -302,28 +319,81 @@ export function MapCanvas(props: MapCanvasProps) {
       props.onViewChange(startRef.current.ox - dx, startRef.current.oy - dy);
       return;
     }
-    if (paintingRef.current) {
-      paintAt(col, row);
+    // left-drag beyond a small threshold becomes a pan (paint tool only; the
+    // pan tool pans from the first mousemove)
+    if (startRef.current?.pending && !panningRef.current && props.tool === "paint") {
+      const dx = x - startRef.current.x;
+      const dy = y - startRef.current.y;
+      if (Math.abs(dx) > DRAG_THRESHOLD || Math.abs(dy) > DRAG_THRESHOLD) {
+        panningRef.current = true;
+      }
     }
   };
 
   const endDrag = () => {
-    paintingRef.current = false;
+    const start = startRef.current;
+    if (start?.pending && !panningRef.current) {
+      clickAt(start.pending.col, start.pending.row);
+    }
     panningRef.current = false;
     startRef.current = null;
   };
 
+  const panAccRef = useRef({ x: 0, y: 0 });
+  const zoomAccRef = useRef(0);
+
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault();
     const tile = TILE_SIZE * props.zoom;
-    if (e.shiftKey) {
-      // shift+wheel: pan (Go scroll parity)
-      const dx = Math.round(e.deltaX / tile) || Math.round(e.deltaY / tile);
-      props.onViewChange(props.offsetX + dx, props.offsetY);
+    // ctrl/meta+wheel = pinch zoom (browser convention for trackpad pinch;
+    // also the mouse-user fallback). ~100px of pinch delta = one old 1.2x
+    // notch; leftovers accumulate so fast trackpad pinches feel snappy too.
+    if (e.ctrlKey || e.metaKey) {
+      zoomAccRef.current += e.deltaY;
+      let z = props.zoom;
+      let changed = false;
+      while (zoomAccRef.current >= 100) {
+        z /= 1.2;
+        zoomAccRef.current -= 100;
+        changed = true;
+      }
+      while (zoomAccRef.current <= -100) {
+        z *= 1.2;
+        zoomAccRef.current += 100;
+        changed = true;
+      }
+      if (changed) {
+        props.onWatchZoom(z);
+      }
       return;
     }
-    const factor = e.deltaY < 0 ? 1.2 : 1 / 1.2;
-    props.onWatchZoom(props.zoom * factor);
+    // plain wheel / two-finger scroll pans the view, accumulating leftover
+    // pixels so trackpad micro-scrolls stay smooth instead of tile-snapping
+    // on every event.
+    const acc = panAccRef.current;
+    acc.x += e.deltaX;
+    acc.y += e.deltaY;
+    let dx = 0;
+    let dy = 0;
+    while (acc.x >= tile) {
+      dx += 1;
+      acc.x -= tile;
+    }
+    while (acc.x <= -tile) {
+      dx -= 1;
+      acc.x += tile;
+    }
+    while (acc.y >= tile) {
+      dy += 1;
+      acc.y -= tile;
+    }
+    while (acc.y <= -tile) {
+      dy -= 1;
+      acc.y += tile;
+    }
+    if (dx !== 0 || dy !== 0) {
+      props.onViewChange(props.offsetX + dx, props.offsetY + dy);
+    }
   };
 
   const handleContextMenu = (e: React.MouseEvent) => {
@@ -336,6 +406,22 @@ export function MapCanvas(props: MapCanvasProps) {
     props.onRightClick(col, row);
   };
 
+  const handleDoubleClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (props.layer !== "script") {
+      return;
+    }
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) {
+      return;
+    }
+    const { col, row } = toTile(e.clientX - rect.left, e.clientY - rect.top);
+    const idx = props.map.scripts.findIndex((s) => s.x === col && s.y === row);
+    if (idx >= 0) {
+      props.onOpenScript(idx);
+    }
+  };
+
   return (
     <div
       ref={containerRef}
@@ -345,6 +431,7 @@ export function MapCanvas(props: MapCanvasProps) {
         position: "relative",
         overflow: "hidden",
         background: "#1a1a1a",
+        cursor: props.tool === "pan" ? "grab" : "crosshair",
       }}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
@@ -355,6 +442,7 @@ export function MapCanvas(props: MapCanvasProps) {
       }}
       onWheel={handleWheel}
       onContextMenu={handleContextMenu}
+      onDoubleClick={handleDoubleClick}
       onAuxClick={(e) => e.preventDefault()}
     >
       <canvas
@@ -434,14 +522,30 @@ export function drawFrame(
       if (sc.x < p.offsetX || sc.y < p.offsetY || px >= w || py >= h) {
         return;
       }
-      drawRect(
-        ctx,
-        px,
-        py,
-        tileW,
-        tileH,
-        i === p.selectedScript ? "#64ff64" : "#00c850"
-      );
+      if (p.layer === "script") {
+        // script layer: filled highlight + id number so scripts are easy to spot
+        ctx.fillStyle = i === p.selectedScript ? "rgba(100,255,100,0.35)" : "rgba(0,200,80,0.28)";
+        ctx.fillRect(px, py, tileW, tileH);
+        drawRect(
+          ctx,
+          px,
+          py,
+          tileW,
+          tileH,
+          i === p.selectedScript ? "#64ff64" : "#00c850"
+        );
+        const labelScale = Math.max(1, Math.floor(tileW / 8));
+        drawLabel(ctx, String(i), px + tileW / 2, py + tileH / 2, labelScale, "#ffffff");
+      } else {
+        drawRect(
+          ctx,
+          px,
+          py,
+          tileW,
+          tileH,
+          i === p.selectedScript ? "#64ff64" : "#00c850"
+        );
+      }
     });
   }
 

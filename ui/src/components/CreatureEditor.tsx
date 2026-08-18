@@ -214,7 +214,10 @@ export function CreatureEditor({ api = defaultApi }: { api?: CreatureApi }) {
   if (!loaded) return <div data-testid="creature-loading">loading creatures…</div>;
 
   return (
-    <div className="flex items-start gap-4 p-4" data-testid="creature-editor">
+    <div
+      className="flex h-full items-start gap-4 overflow-auto p-4"
+      data-testid="creature-editor"
+    >
       <Card className="w-60 shrink-0">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">

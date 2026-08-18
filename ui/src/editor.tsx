@@ -17,6 +17,7 @@ import {
   reducer,
   LAYERS,
   type LayerType,
+  type EditorTool,
 } from "./state";
 import {
   Tileset,
@@ -112,14 +113,14 @@ export function MapEditor({
   const selectedScriptKey =
     state.selectedNpc >= 0
       ? `npc:${state.selectedNpc}`
-      : state.selectedScript >= 0
-        ? `script:${state.selectedScript}`
+      : state.editingScript >= 0
+        ? `script:${state.editingScript}`
         : null;
   const selectedScriptText =
     state.selectedNpc >= 0 && state.map.npcs[state.selectedNpc]
       ? state.map.npcs[state.selectedNpc].script
-      : state.selectedScript >= 0 && state.map.scripts[state.selectedScript]
-        ? state.map.scripts[state.selectedScript].script
+      : state.editingScript >= 0 && state.map.scripts[state.editingScript]
+        ? state.map.scripts[state.editingScript].script
         : "";
   useEffect(() => {
     if (!active) {
@@ -136,12 +137,23 @@ export function MapEditor({
     return () => window.clearTimeout(handle);
   }, [selectedScriptKey, selectedScriptText, deps, active]);
 
-  // keyboard shortcuts: Ctrl+Z undo, Ctrl+= zoom in, Ctrl+- zoom out, H highlight
+  // keyboard shortcuts: Ctrl+Z undo, Ctrl+= zoom in, Ctrl+- zoom out, H highlight,
+  // P paint tool, G pan tool. Ignored while typing in fields.
   useEffect(() => {
     if (!active) {
       return;
     }
     const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const editing =
+        !!target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT" ||
+          target.isContentEditable);
+      if (editing) {
+        return;
+      }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
         e.preventDefault();
         dispatch({ type: "UNDO" });
@@ -153,6 +165,12 @@ export function MapEditor({
         dispatch({ type: "SET_ZOOM", zoom: state.zoom / 1.5 });
       } else if (e.key.toLowerCase() === "h") {
         dispatch({ type: "TOGGLE_CHUNK_HIGHLIGHT" });
+      } else if (e.key.toLowerCase() === "p") {
+        dispatch({ type: "SET_TOOL", tool: "paint" });
+      } else if (e.key.toLowerCase() === "g") {
+        dispatch({ type: "SET_TOOL", tool: "pan" });
+      } else if (e.key === "Escape") {
+        dispatch({ type: "OPEN_SCRIPT", id: -1 });
       }
     };
     window.addEventListener("keydown", onKey);
@@ -166,7 +184,12 @@ export function MapEditor({
 
   const save = useCallback(async () => {
     try {
-      await deps.saveMap(state.map);
+      // scripts without any text are dead placeholders from panel clicks — drop
+      const map = {
+        ...state.map,
+        scripts: state.map.scripts.filter((s) => s.script.trim() !== ""),
+      };
+      await deps.saveMap(map);
       setStatus("map saved");
     } catch (err) {
       setStatus(`save failed: ${String(err)}`);
@@ -196,8 +219,7 @@ export function MapEditor({
   }, [deps, setStatus]);
 
   const selectedNpcs = state.selectedNpc >= 0 ? [state.map.npcs[state.selectedNpc]] : [];
-  const selectedScripts =
-    state.selectedScript >= 0 ? [state.map.scripts[state.selectedScript]] : [];
+  const editingScripts = state.editingScript >= 0 ? [state.map.scripts[state.editingScript]] : [];
 
   // Tile grid fills the panel width (1fr columns); size the sidebar to fit a
   // full sheet row by default, or keep the user's dragged width.
@@ -272,6 +294,7 @@ export function MapEditor({
               variant={paletteTab === t ? "default" : "ghost"}
               onClick={() => {
                 setPaletteTab(t);
+                dispatch({ type: "SET_TOOL", tool: "paint" });
                 dispatch({ type: "SET_LAYER", layer: t as LayerType });
               }}
             >
@@ -287,9 +310,10 @@ export function MapEditor({
               tilePx={paletteTilePx(mapTiles.perRow)}
               sensitivity={zoomSens}
               selected={state.activeBlock}
-              onSelectBlock={(block, w, h) =>
-                dispatch({ type: "SET_ACTIVE_BLOCK", block, w, h })
-              }
+              onSelectBlock={(block, w, h) => {
+                dispatch({ type: "SET_TOOL", tool: "paint" });
+                dispatch({ type: "SET_ACTIVE_BLOCK", block, w, h });
+              }}
               emptyLabel="No map tileset loaded (set map_tileset_png)"
             />
           )}
@@ -300,9 +324,10 @@ export function MapEditor({
               tilePx={paletteTilePx(npcTiles.perRow)}
               sensitivity={zoomSens}
               selected={[state.activeNpcSprite]}
-              onSelectBlock={(block) =>
-                dispatch({ type: "SET_NPC_SPRITE", sprite: block[0] ?? 0 })
-              }
+              onSelectBlock={(block) => {
+                dispatch({ type: "SET_TOOL", tool: "paint" });
+                dispatch({ type: "SET_NPC_SPRITE", sprite: block[0] ?? 0 });
+              }}
               emptyLabel="No NPC tileset loaded (set npc_tileset_png)"
             />
           )}
@@ -312,9 +337,10 @@ export function MapEditor({
                 Active collision type
                 <select
                   value={state.activeCollisionType}
-                  onChange={(e) =>
-                    dispatch({ type: "SET_COLLISION_TYPE", id: Number(e.target.value) })
-                  }
+                  onChange={(e) => {
+                      dispatch({ type: "SET_TOOL", tool: "paint" });
+                      dispatch({ type: "SET_COLLISION_TYPE", id: Number(e.target.value) });
+                    }}
                   style={{ display: "block", width: "100%", marginTop: 4 }}
                 >
                   {state.map.collision_types.map((ct) => (
@@ -350,9 +376,10 @@ export function MapEditor({
                 Active encounter zone
                 <select
                   value={state.activeEncounterZone}
-                  onChange={(e) =>
-                    dispatch({ type: "SET_ENCOUNTER_ZONE", id: Number(e.target.value) })
-                  }
+                  onChange={(e) => {
+                      dispatch({ type: "SET_TOOL", tool: "paint" });
+                      dispatch({ type: "SET_ENCOUNTER_ZONE", id: Number(e.target.value) });
+                    }}
                   style={{ display: "block", width: "100%", marginTop: 4 }}
                 >
                   {state.map.encounter_zones.map((z) => (
@@ -410,8 +437,9 @@ export function MapEditor({
             data-testid="zoom-sensitivity"
           />
           <div className="mt-1">
-            wheel: zoom · shift+wheel: pan · drag: paint · alt/middle-drag: pan ·
-            right-click: delete/clear · ctrl+z: undo
+            wheel/2-finger: pan · pinch or ctrl+wheel: zoom · p/g: paint/pan ·
+            alt/middle-drag: pan · right-click: delete/clear · dbl-click: edit script ·
+            esc: close · ctrl+z: undo
           </div>
         </div>
       </div>
@@ -436,7 +464,20 @@ export function MapEditor({
             flexWrap: "wrap",
           }}
         >
-          <span style={{ fontSize: 12 }}>Layer:</span>
+          <span style={{ fontSize: 12 }}>Tool:</span>
+          {(["paint", "pan"] as EditorTool[]).map((t) => (
+            <Button
+              key={t}
+              type="button"
+              variant={state.tool === t ? "default" : "ghost"}
+              size="sm"
+              aria-pressed={state.tool === t}
+              onClick={() => dispatch({ type: "SET_TOOL", tool: t })}
+            >
+              {t}
+            </Button>
+          ))}
+          <span style={{ fontSize: 12, marginLeft: 8 }}>Layer:</span>
           <select
             value={state.layer}
             onChange={(e) => dispatch({ type: "SET_LAYER", layer: e.target.value as LayerType })}
@@ -521,6 +562,7 @@ export function MapEditor({
             tiles={mapTiles.tiles}
             npcTiles={npcTiles.tiles}
             layer={state.layer}
+            tool={state.tool}
             zoom={state.zoom}
             offsetX={state.offsetX}
             offsetY={state.offsetY}
@@ -545,6 +587,7 @@ export function MapEditor({
             onPaintEncounter={(col, row) => dispatch({ type: "PAINT_ENCOUNTER", col, row })}
             onClickNpc={(col, row) => dispatch({ type: "CLICK_NPC", col, row })}
             onClickScript={(col, row) => dispatch({ type: "CLICK_SCRIPT", col, row })}
+            onOpenScript={(id) => dispatch({ type: "OPEN_SCRIPT", id })}
             onRightClick={(col, row) => dispatch({ type: "RIGHT_CLICK", col, row })}
           />
         </div>
@@ -607,19 +650,19 @@ export function MapEditor({
             }
           />
         )}
-        {selectedScripts[0] && (
+        {editingScripts[0] && (
           <ScriptPane
-            title={`Script ${selectedScripts[0].id} @ (${selectedScripts[0].x},${selectedScripts[0].y}) — script`}
-            script={selectedScripts[0].script}
-            parseKey={state.parseKey === `script:${selectedScripts[0].id}` ? state.parseKey : null}
+            title={`Script ${editingScripts[0].id} @ (${editingScripts[0].x},${editingScripts[0].y}) — script`}
+            script={editingScripts[0].script}
+            parseKey={state.parseKey === `script:${editingScripts[0].id}` ? state.parseKey : null}
             parseResult={
-              state.parseKey === `script:${selectedScripts[0].id}` ? state.parseResult : null
+              state.parseKey === `script:${editingScripts[0].id}` ? state.parseResult : null
             }
             onChange={(text) =>
               dispatch({
                 type: "SET_SCRIPT_TEXT",
                 target: "script",
-                id: selectedScripts[0].id,
+                id: editingScripts[0].id,
                 text,
               })
             }

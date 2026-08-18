@@ -35,24 +35,33 @@ export function ScriptPane({
         onChange={(e) => onChange(e.target.value)}
         rows={6}
         spellCheck={false}
-        className="resize-y font-mono text-xs"
+        className="h-28 [field-sizing:fixed] resize-y font-mono text-xs"
         data-testid="script-textarea"
       />
-      {parseKey && parseResult ? (
-        parseResult.ok ? (
-          <div className="text-green-400" data-testid="script-ok">
-            script parses ok
-          </div>
-        ) : (
-          <ul className="text-red-400" style={{ margin: 0, paddingLeft: 18 }} data-testid="script-errors">
-            {parseResult.errors.map((err, i) => (
-              <li key={i} style={{ fontFamily: "monospace", fontSize: 12 }}>
-                line {err.line}, col {err.col}: {err.msg}
-              </li>
-            ))}
-          </ul>
-        )
-      ) : null}
+      <div
+        className="min-h-[1.5rem] text-xs leading-5"
+        data-testid="script-status"
+      >
+        {parseKey && parseResult ? (
+          parseResult.ok ? (
+            <div className="text-green-400" data-testid="script-ok">
+              script parses ok
+            </div>
+          ) : (
+            <ul
+              className="text-red-400 max-h-24 overflow-auto"
+              style={{ margin: 0, paddingLeft: 18 }}
+              data-testid="script-errors"
+            >
+              {parseResult.errors.map((err, i) => (
+                <li key={i} style={{ fontFamily: "monospace", fontSize: 12 }}>
+                  line {err.line}, col {err.col}: {err.msg}
+                </li>
+              ))}
+            </ul>
+          )
+        ) : null}
+      </div>
     </div>
   );
 }

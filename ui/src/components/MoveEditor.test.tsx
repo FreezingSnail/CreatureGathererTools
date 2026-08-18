@@ -26,7 +26,9 @@ async function renderEditor() {
 describe("MoveEditor", () => {
   it("loads and lists moves", async () => {
     await renderEditor();
-    expect(screen.getByTestId("move-editor")).toBeInTheDocument();
+    const root = screen.getByTestId("move-editor");
+    expect(root).toBeInTheDocument();
+    expect(root).toHaveClass("h-full", "overflow-auto");
     expect(screen.getByText("Tackle")).toBeInTheDocument();
     expect(screen.getByText("Ember")).toBeInTheDocument();
   });

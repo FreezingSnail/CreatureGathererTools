@@ -142,6 +142,28 @@ describe("App shell", () => {
     expect(screen.queryByTestId("setup-dialog")).not.toBeInTheDocument();
   });
 
+  it("hides inactive TabsContent panels while keeping them mounted", async () => {
+    mockBoot();
+    render(<App />);
+    await screen.findByTestId("palette");
+
+    const mapPanel = screen.getByTestId("tab-panel-map");
+    const creaturePanel = screen.getByTestId("tab-panel-creature");
+    const movePanel = screen.getByTestId("tab-panel-move");
+
+    expect(mapPanel.getAttribute("role")).toBe("tabpanel");
+    expect(creaturePanel.getAttribute("role")).toBe("tabpanel");
+    expect(movePanel.getAttribute("role")).toBe("tabpanel");
+
+    expect(mapPanel).toHaveAttribute("data-state", "active");
+    expect(creaturePanel).toHaveAttribute("data-state", "inactive");
+    expect(movePanel).toHaveAttribute("data-state", "inactive");
+
+    for (const panel of [mapPanel, creaturePanel, movePanel]) {
+      expect(panel.className).toContain("data-[state=inactive]:hidden");
+    }
+  });
+
   it("preserves creature editor state across tab switches", async () => {
     mockBoot();
     const user = userEvent.setup();

@@ -3,8 +3,16 @@
 /src-tauri/gen/schemas
 
 # Node
+/node_modules
 /ui/node_modules
 /ui/dist
+
+# machine-specific app config (rate limits, asset paths — do not commit)
+/src-tauri/creature-tools.json
+
+# dev logs / stray reports
+/tauri-dev.log
+/output-2nw.*.md
 
 # Cargo
 /output
