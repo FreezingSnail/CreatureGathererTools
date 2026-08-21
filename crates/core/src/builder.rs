@@ -419,6 +419,193 @@ pub fn write_moves(cfg: &Config, moves: &[Move]) -> Result<(), BuildError> {
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// FX text descriptors consumed by fxdata-build.py. These use the FX type
+// encoding (`none = 15`), which intentionally differs from the legacy Go
+// creature binary's `none = 8` encoding above.
+
+fn fx_type_byte(ty: &str) -> Option<u8> {
+    match ty {
+        "spirit" => Some(0),
+        "water" => Some(1),
+        "wind" => Some(2),
+        "earth" => Some(3),
+        "fire" => Some(4),
+        "lightning" => Some(5),
+        "plant" => Some(6),
+        "elder" => Some(7),
+        "status" => Some(8),
+        "none" => Some(15),
+        _ => None,
+    }
+}
+
+/// Builds the `creatureData.txt` descriptor emitted by
+/// `tools/data_converters/creature_data.py`.
+pub fn build_fx_creature_descriptor(creatures: &[Creature]) -> Result<String, BuildError> {
+    let mut output = String::from(
+        "// Generated from data/Creaturesheet.csv by tools/data_converters/creature_data.py.\n\
+         // Do not edit: regenerate with python3 tools/data_converters/creature_data.py.\n\
+         namespace CreatureData {\n\nuint8_t creatureData[] = {\n",
+    );
+    for creature in creatures {
+        let type1 = fx_type_byte(&creature.type1)
+            .ok_or_else(|| BuildError(format!("unknown FX type for creature {}", creature.name)))?;
+        let type2 = fx_type_byte(&creature.type2)
+            .ok_or_else(|| BuildError(format!("unknown FX type for creature {}", creature.name)))?;
+        output.push_str(&format!(
+            "    {{{}, {type1}, {type2}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}}},\n",
+            creature.id,
+            creature.evo_level,
+            creature.atk,
+            creature.def,
+            creature.spc_atk,
+            creature.spc_def,
+            creature.hp,
+            creature.spd,
+            creature.move1,
+            creature.move2,
+            creature.move3,
+            creature.move4,
+        ));
+    }
+    output.push_str("};\n}\nnamespace_end\n");
+    Ok(output)
+}
+
+/// Builds `movedata.txt`, the legacy FX move-table descriptor. `15` is the
+/// fixed secondary-type sentinel used by the original generated descriptor.
+pub fn build_fx_move_descriptor(moves: &[Move]) -> Result<String, BuildError> {
+    let mut output = String::from("namespace MoveData {\nuint8_t movePack[] = {\n");
+    let mut ordered: Vec<&Move> = moves.iter().collect();
+    ordered.sort_by_key(|movement| movement.id != 255);
+    for movement in ordered {
+        let ty = fx_type_byte(&movement.r#type).ok_or_else(|| {
+            BuildError(format!(
+                "unknown FX move type {:?} for move {}",
+                movement.r#type, movement.name
+            ))
+        })?;
+        let effect = effect_index(&movement.effect).unwrap_or(0xFF);
+        output.push_str(&format!(
+            "{{ {ty}, {}, 15, {}, {effect} }},\n",
+            movement.power, movement.accuracy
+        ));
+    }
+    output.push_str("};\n} namespace_end\n");
+    Ok(output)
+}
+
+/// Builds `opponents.txt`, preserving the per-opponent labels and 6-byte row
+/// grouping emitted by `opponent_data.py --format fx`.
+pub fn build_fx_opponents_descriptor(opponents: &[OpponentSeed]) -> String {
+    let mut output = String::new();
+    for (index, opponent) in opponents.iter().enumerate() {
+        let label = if index == 0 {
+            "opponent_seeds".to_owned()
+        } else {
+            format!("opponent_seed_{index}")
+        };
+        output.push_str(&format!("uint8_t {label}[] = {{\n"));
+        let bytes = build_opponents(std::slice::from_ref(opponent));
+        for row in bytes.chunks_exact(6) {
+            let values = row
+                .iter()
+                .map(|byte| format!("0x{byte:02X}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            output.push_str(&format!("    {values},\n"));
+        }
+        output.push_str("};\n\n");
+    }
+    output.push_str("uint24_t opts[] = {\n");
+    for index in 0..opponents.len() {
+        let label = if index == 0 {
+            "opponent_seeds".to_owned()
+        } else {
+            format!("opponent_seed_{index}")
+        };
+        output.push_str(&format!("    {label},\n"));
+    }
+    output.push_str("};\n");
+    output
+}
+
+/// Writes all FX text descriptors into one artifact directory.
+pub fn write_fx_descriptors(
+    output_dir: impl AsRef<Path>,
+    creatures: &[Creature],
+    moves: &[Move],
+    opponents: &[OpponentSeed],
+) -> Result<(), BuildError> {
+    let output_dir = output_dir.as_ref();
+    std::fs::create_dir_all(output_dir).map_err(|e| io_err("creating", output_dir, e))?;
+    let creature_path = output_dir.join("creatureData.txt");
+    let move_path = output_dir.join("movedata.txt");
+    let opponent_path = output_dir.join("opponents.txt");
+    write_str(&creature_path, &build_fx_creature_descriptor(creatures)?)?;
+    write_str(&move_path, &build_fx_move_descriptor(moves)?)?;
+    write_str(&opponent_path, &build_fx_opponents_descriptor(opponents))
+}
+
+/// Captured Python-reference descriptor bytes for a shared project parity run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FxDescriptorReference {
+    pub opponents: Vec<u8>,
+    pub creatures: Vec<u8>,
+    pub moves: Vec<u8>,
+}
+
+/// Runs the available Python descriptor writers before Rust output overwrites
+/// the same FX paths, then captures all three reference descriptors.
+pub fn capture_project_fx_descriptor_reference(
+    project_root: impl AsRef<Path>,
+) -> Result<FxDescriptorReference, BuildError> {
+    let root = project_root.as_ref();
+    for script in [
+        "tools/data_converters/opponent_data.py",
+        "tools/data_converters/creature_data.py",
+    ] {
+        let status = Command::new("python3")
+            .arg(script)
+            .current_dir(root)
+            .status()
+            .map_err(|e| BuildError(format!("running python3 {script}: {e}")))?;
+        if !status.success() {
+            return Err(BuildError(format!(
+                "reference converter failed ({status}): cd {} && python3 {script}",
+                root.display()
+            )));
+        }
+    }
+    let read = |relative: &str| {
+        let path = root.join(relative);
+        std::fs::read(&path).map_err(|e| io_err("reading", &path, e))
+    };
+    Ok(FxDescriptorReference {
+        opponents: read("fxdata/generated/opponents.txt")?,
+        creatures: read("fxdata/data/creatureData.txt")?,
+        moves: read("fxdata/generated/movedata.txt")?,
+    })
+}
+
+/// Checks all FX descriptors through the shared byte-parity diagnostic.
+pub fn verify_fx_descriptor_parity(
+    reference: &FxDescriptorReference,
+    actual: &FxDescriptorReference,
+    python_command: &str,
+    rust_command: &str,
+) -> Result<(), BuildError> {
+    for (artifact, expected, got) in [
+        ("opponents.txt", &reference.opponents, &actual.opponents),
+        ("creatureData.txt", &reference.creatures, &actual.creatures),
+        ("movedata.txt", &reference.moves, &actual.moves),
+    ] {
+        verify_byte_parity(artifact, expected, got, python_command, rust_command)?;
+    }
+    Ok(())
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // Opponent builder. The canonical source remains `data/opponents.csv`: it is
 // deliberately not moved to JSON because `tools/data_converters/opponent_data.py`
 // reads that same CSV. Keeping one source makes Python/Rust byte parity a direct
@@ -1195,6 +1382,85 @@ mod tests {
             std::fs::read_to_string(format!("{}/moves.hpp", cfg.output_dir)).expect("read hpp");
         assert_eq!(bin, EXPECTED_MOVES_BIN.to_vec());
         assert_eq!(hpp, EXPECTED_MOVES_HPP);
+    }
+
+    // ─── FX text descriptors consumed by fxdata-build.py ───
+    #[test]
+    fn fx_creature_descriptor_matches_python_format() {
+        let descriptor = build_fx_creature_descriptor(&fixture_creatures()).expect("build");
+        assert_eq!(
+            descriptor,
+            "// Generated from data/Creaturesheet.csv by tools/data_converters/creature_data.py.\n\
+             // Do not edit: regenerate with python3 tools/data_converters/creature_data.py.\n\
+             namespace CreatureData {\n\nuint8_t creatureData[] = {\n\
+             \x20   {0, 2, 15, 8, 3, 3, 2, 2, 3, 3, 8, 32, 32, 32},\n\
+             \x20   {99, 15, 15, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0},\n\
+             };\n}\nnamespace_end\n"
+        );
+    }
+
+    #[test]
+    fn fx_move_descriptor_matches_python_format() {
+        let descriptor = build_fx_move_descriptor(&fixture_moves()).expect("build");
+        assert_eq!(
+            descriptor,
+            "namespace MoveData {\nuint8_t movePack[] = {\n\
+             { 0, 10, 15, 100, 255 },\n\
+             { 0, 5, 15, 100, 255 },\n\
+             };\n} namespace_end\n"
+        );
+    }
+
+    #[test]
+    fn fx_opponents_descriptor_matches_python_format() {
+        let opponents = load_opponents_csv(OPPONENTS_CSV).expect("fixture parses");
+        assert_eq!(
+            build_fx_opponents_descriptor(&opponents),
+            "uint8_t opponent_seeds[] = {\n\
+             \x20   0x00, 0x1F, 0x00, 0x01, 0xFF, 0xFF,\n\
+             \x20   0xFF, 0x00, 0x17, 0xFF, 0xFF, 0xFF,\n\
+             \x20   0x1D, 0xFF, 0x1F, 0xFF, 0xFF, 0xFF,\n\
+             };\n\nuint24_t opts[] = {\n    opponent_seeds,\n};\n"
+        );
+    }
+
+    #[test]
+    fn write_fx_descriptors_emits_all_pack_inputs() {
+        let output = format!("{TD}/testdata/builder_out/fx_descriptors");
+        let creatures = fixture_creatures();
+        let moves = fixture_moves();
+        let opponents = load_opponents_csv(OPPONENTS_CSV).expect("fixture parses");
+        write_fx_descriptors(&output, &creatures, &moves, &opponents).expect("write");
+        assert_eq!(
+            std::fs::read_to_string(format!("{output}/creatureData.txt")).expect("read creature"),
+            build_fx_creature_descriptor(&creatures).expect("build")
+        );
+        assert_eq!(
+            std::fs::read_to_string(format!("{output}/movedata.txt")).expect("read move"),
+            build_fx_move_descriptor(&moves).expect("build")
+        );
+        assert_eq!(
+            std::fs::read_to_string(format!("{output}/opponents.txt")).expect("read opponents"),
+            build_fx_opponents_descriptor(&opponents)
+        );
+    }
+
+    #[test]
+    fn fx_descriptor_parity_checks_all_three_artifacts() {
+        let reference = FxDescriptorReference {
+            opponents: b"opponents".to_vec(),
+            creatures: b"creatures".to_vec(),
+            moves: b"moves".to_vec(),
+        };
+        let mut actual = reference.clone();
+        actual.moves[0] = b'M';
+        let error =
+            verify_fx_descriptor_parity(&reference, &actual, "python3 reference", "cgfx-tools")
+                .expect_err("move descriptor mismatch must fail");
+        assert_eq!(
+            error.to_string(),
+            "movedata.txt parity mismatch at byte 0: expected 0x6D from `python3 reference`, got 0x4D from `cgfx-tools`"
+        );
     }
 
     // ─── opponents.bin: Python opponent_data.py layout ───

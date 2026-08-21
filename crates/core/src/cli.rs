@@ -16,8 +16,7 @@ pub struct Cli {
             "arena_csv",
             "arena_output",
             "type_table_csv",
-            "type_table_output",
-            "parity"
+            "type_table_output"
         ]
     )]
     pub project: Option<PathBuf>,
@@ -55,10 +54,12 @@ pub struct Cli {
     /// Build `typetable.bin` from the canonical `data/typetable.csv` source.
     #[arg(long, value_name = "CSV", conflicts_with_all = ["input", "opponents_csv", "arena_csv"])]
     pub type_table_csv: Option<PathBuf>,
-    /// Run the selected legacy Python generator and byte-compare its output.
-    /// Requires a CSV builder mode; validated by the selected mode.
+    /// Run the applicable legacy Python generators and byte-compare outputs.
     #[arg(long)]
     pub parity: bool,
+    /// Emit model-derived FX device-test fixture headers from the project configuration.
+    #[arg(long, requires = "project")]
+    pub emit_fixtures: bool,
 }
 
 #[cfg(test)]
@@ -73,6 +74,14 @@ mod tests {
         assert_eq!(cli.project, Some(PathBuf::from("cgfx-project.json")));
         assert!(cli.input.is_none());
         assert!(cli.output.is_none());
+    }
+
+    #[test]
+    fn project_mode_accepts_parity() {
+        let cli = Cli::try_parse_from(["cgfx-tools", "--project", "cgfx-project.json", "--parity"])
+            .expect("project parity invocation parses");
+        assert_eq!(cli.project, Some(PathBuf::from("cgfx-project.json")));
+        assert!(cli.parity);
     }
 
     #[test]
@@ -108,6 +117,19 @@ mod tests {
         );
         assert_eq!(cli.type_table_output, Some(PathBuf::from("out")));
         assert!(cli.parity);
+    }
+
+    #[test]
+    fn project_mode_accepts_emit_fixtures() {
+        let cli = Cli::try_parse_from([
+            "cgfx-tools",
+            "--project",
+            "cgfx-project.json",
+            "--emit-fixtures",
+        ])
+        .expect("fixture project invocation parses");
+        assert_eq!(cli.project, Some(PathBuf::from("cgfx-project.json")));
+        assert!(cli.emit_fixtures);
     }
 
     #[test]

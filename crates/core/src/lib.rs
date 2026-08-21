@@ -2,6 +2,7 @@ pub mod arena;
 pub mod builder;
 pub mod cli;
 pub mod config;
+pub mod fixtures;
 pub mod model;
 pub mod parser;
 pub mod processor;
@@ -17,7 +18,7 @@ pub fn run() -> anyhow::Result<()> {
     let args = cli::Cli::parse();
 
     if let Some(project) = args.project {
-        return run_project(&project);
+        return run_project_with_options(&project, args.parity, args.emit_fixtures);
     }
 
     if let Some(csv) = args.type_table_csv {
@@ -115,6 +116,19 @@ pub fn run() -> anyhow::Result<()> {
 
 /// Compiles a complete data project described by a config file.
 pub fn run_project(path: impl AsRef<Path>) -> anyhow::Result<()> {
+    run_project_with_options(path, false, false)
+}
+
+fn run_project_with_options(
+    path: impl AsRef<Path>,
+    parity: bool,
+    emit_fixtures: bool,
+) -> anyhow::Result<()> {
+    let path = path.as_ref();
+    let project_root = path.parent().unwrap_or_else(|| Path::new("."));
+    let reference = parity
+        .then(|| builder::capture_project_fx_descriptor_reference(project_root))
+        .transpose()?;
     let cfg = config::Config::load_from(path)?;
     let store = store::Store::new(&cfg);
 
@@ -126,8 +140,56 @@ pub fn run_project(path: impl AsRef<Path>) -> anyhow::Result<()> {
     let moves = store.load_moves().with_context(|| "Loading moves")?;
     builder::write_moves(&cfg, &moves).with_context(|| "Writing move artifacts")?;
 
+    let opponents_csv = project_root.join("data/opponents.csv");
+    let opponents = builder::load_opponents_csv(&opponents_csv)
+        .with_context(|| format!("Loading opponents from {}", opponents_csv.display()))?;
+    builder::write_fx_descriptors(&cfg.output_dir, &creatures, &moves, &opponents)
+        .with_context(|| "Writing FX text descriptors")?;
+
+    // `fxdata.txt` includes creatureData from its sibling data directory.
+    // Keep the generated copy in output_dir for tool consumers and update the
+    // canonical pack input when this is an FX project layout.
+    let canonical_creature = project_root.join("fxdata/data/creatureData.txt");
+    if canonical_creature.parent().is_some_and(Path::exists) {
+        let descriptor = builder::build_fx_creature_descriptor(&creatures)?;
+        std::fs::write(&canonical_creature, descriptor)
+            .with_context(|| format!("Writing {}", canonical_creature.display()))?;
+    }
+
+    if let Some(reference) = reference {
+        let output = Path::new(&cfg.output_dir);
+        let actual = builder::FxDescriptorReference {
+            opponents: std::fs::read(output.join("opponents.txt"))?,
+            creatures: std::fs::read(output.join("creatureData.txt"))?,
+            moves: std::fs::read(output.join("movedata.txt"))?,
+        };
+        builder::verify_fx_descriptor_parity(
+            &reference,
+            &actual,
+            "python3 tools/data_converters/{opponent_data,creature_data}.py",
+            &format!("cgfx-tools --project {} --parity", path.display()),
+        )?;
+    }
+
     let map = store.load_map().with_context(|| "Loading map")?;
     builder::write_map(&cfg, &map).with_context(|| "Writing map artifacts")?;
+
+    if emit_fixtures {
+        let fixture_dir = cfg.fixture_dir.as_deref().ok_or_else(|| {
+            anyhow::anyhow!("--emit-fixtures requires fixture_dir in {}", path.display())
+        })?;
+        let arena_csv = project_root.join("data/arena.csv");
+        let arena = arena::parse_arena_csv(&arena_csv)
+            .with_context(|| format!("Loading arena from {}", arena_csv.display()))?;
+        let processed = fixtures::FixtureProject {
+            creatures: &creatures,
+            moves: &moves,
+            opponents: &opponents,
+            arena: &arena,
+        };
+        fixtures::emit_fixtures(&processed, fixture_dir)
+            .with_context(|| format!("Writing fixtures to {fixture_dir}"))?;
+    }
 
     Ok(())
 }
