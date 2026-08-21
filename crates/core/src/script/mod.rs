@@ -20,9 +20,7 @@ pub mod lexer;
 use std::collections::HashMap;
 use std::fmt;
 
-pub use crate::processor::ast::{
-    Branch, Cmd, Condition, Location, Opcode, Text, ToBytecode,
-};
+pub use crate::processor::ast::{Branch, Cmd, Condition, Location, Opcode, Text, ToBytecode};
 
 pub use lexer::{Lexer, Token, TokenKind};
 
@@ -183,7 +181,9 @@ fn parse_msg(lex: &mut Lexer, controller: &mut Controller) -> Result<Cmd, Script
         unreachable!()
     };
     let index = controller.insert_text(&text);
-    Ok(Cmd::Msg { text: Text { text, index } })
+    Ok(Cmd::Msg {
+        text: Text { text, index },
+    })
 }
 
 fn parse_location(
@@ -222,7 +222,10 @@ fn parse_tmsg(
         unreachable!()
     };
     let index = controller.insert_text(&text);
-    Ok(Cmd::TMsg { at, text: Text { text, index } })
+    Ok(Cmd::TMsg {
+        at,
+        text: Text { text, index },
+    })
 }
 
 fn parse_smsg(
@@ -336,13 +339,21 @@ fn parse_branch(
                 TokenKind::Ident(ident) => {
                     parse_cmd(lex, &ident, line, col, locations, controller).map(Some)
                 }
-                other => Err(err(line, col, format!("if branch: expected command after {kw}, got {other:?}"))),
+                other => Err(err(
+                    line,
+                    col,
+                    format!("if branch: expected command after {kw}, got {other:?}"),
+                )),
             }
         }
         TokenKind::Ident(ident) => {
             parse_cmd(lex, &ident, line, col, locations, controller).map(Some)
         }
-        other => Err(err(line, col, format!("if branch: expected command or endif, got {other:?}"))),
+        other => Err(err(
+            line,
+            col,
+            format!("if branch: expected command or endif, got {other:?}"),
+        )),
     }
 }
 
@@ -489,8 +500,17 @@ mod tests {
         let (cmds, _) = parse_ok("if flag_X then setflag flag_Y else unsetflag flag_Y endif");
         assert_eq!(cmds.len(), 1);
         match &cmds[0] {
-            Cmd::If { condition, branches } => {
-                assert_eq!(*condition, Condition::FlagSet(Text { text: "flag_X".into(), index: 0 }));
+            Cmd::If {
+                condition,
+                branches,
+            } => {
+                assert_eq!(
+                    *condition,
+                    Condition::FlagSet(Text {
+                        text: "flag_X".into(),
+                        index: 0
+                    })
+                );
                 match branches {
                     Branch::ThenElse(then_cmd, else_cmd) => {
                         assert!(matches!(**then_cmd, Cmd::SetFlag { .. }));
@@ -508,10 +528,16 @@ mod tests {
         let (cmds, _) = parse_ok("if flag_test1 then tp 1 1 endif");
         assert_eq!(cmds.len(), 1);
         match &cmds[0] {
-            Cmd::If { condition, branches } => {
+            Cmd::If {
+                condition,
+                branches,
+            } => {
                 assert_eq!(
                     *condition,
-                    Condition::FlagSet(Text { text: "flag_test1".into(), index: 0 })
+                    Condition::FlagSet(Text {
+                        text: "flag_test1".into(),
+                        index: 0
+                    })
                 );
                 match branches {
                     Branch::Then(cmd) => assert!(matches!(**cmd, Cmd::Tp { .. })),
@@ -632,13 +658,17 @@ mod tests {
 
     #[test]
     fn parity_cmd_unsetflag_bytes() {
-        let cmd = Cmd::UnsetFlag { flag: txt(5, "flag") };
+        let cmd = Cmd::UnsetFlag {
+            flag: txt(5, "flag"),
+        };
         assert_eq!(cmd.to_bytes(), vec![7, 0, 5]);
     }
 
     #[test]
     fn parity_cmd_readflag_bytes() {
-        let cmd = Cmd::ReadFlag { flag: txt(5, "flag") };
+        let cmd = Cmd::ReadFlag {
+            flag: txt(5, "flag"),
+        };
         assert_eq!(cmd.to_bytes(), vec![8, 0, 5]);
     }
 
@@ -653,7 +683,9 @@ mod tests {
 
     #[test]
     fn parity_cmd_setflag_bytes() {
-        let cmd = Cmd::SetFlag { flag: txt(5, "flag") };
+        let cmd = Cmd::SetFlag {
+            flag: txt(5, "flag"),
+        };
         assert_eq!(cmd.to_bytes(), vec![6, 0, 5]);
     }
 
@@ -755,8 +787,12 @@ mod tests {
     #[test]
     fn missing_endif_reports_position() {
         let mut ctrl = Controller::new();
-        let err = parse("if flag_X then setflag flag_Y else setflag flag_Z", &loc_map(), &mut ctrl)
-            .expect_err("must fail");
+        let err = parse(
+            "if flag_X then setflag flag_Y else setflag flag_Z",
+            &loc_map(),
+            &mut ctrl,
+        )
+        .expect_err("must fail");
         assert!(err.msg.contains("expected endif"), "msg: {}", err.msg);
     }
 

@@ -69,8 +69,8 @@ impl Error for TiledError {}
 /// Missing or unknown layers are reported as errors, mirroring
 /// [`crate::parser::load_from_json`].
 pub fn import(json: &str) -> Result<GameMap, TiledError> {
-    let root: Value = serde_json::from_str(json)
-        .map_err(|e| TiledError(format!("Failed to parse JSON: {e}")))?;
+    let root: Value =
+        serde_json::from_str(json).map_err(|e| TiledError(format!("Failed to parse JSON: {e}")))?;
 
     let layers = root
         .get("layers")
@@ -127,7 +127,7 @@ pub fn import(json: &str) -> Result<GameMap, TiledError> {
         _ => {
             return Err(TiledError(format!(
                 "map data length {actual} does not match {width}x{height}"
-            )))
+            )));
         }
     }
 
@@ -287,7 +287,9 @@ fn parse_map_layer(layer: &Value) -> Result<Vec<u16>, TiledError> {
 
     let mut buf = Vec::with_capacity(data.len());
     for v in data {
-        let id = v.as_u64().ok_or_else(|| TiledError("invalid map data".to_string()))?;
+        let id = v
+            .as_u64()
+            .ok_or_else(|| TiledError("invalid map data".to_string()))?;
         if id > u16::MAX as u64 {
             return Err(TiledError(format!("map tile id {id} exceeds u16")));
         }
@@ -325,7 +327,9 @@ fn parse_scripts_layer(layer: &Value) -> Result<Vec<ScriptObject>, TiledError> {
                 })
             })
             .ok_or_else(|| {
-                TiledError(format!("object {i} at ({x}, {y}) missing `script` property"))
+                TiledError(format!(
+                    "object {i} at ({x}, {y}) missing `script` property"
+                ))
             })?;
 
         if script_value.len() > 10_000 {
@@ -488,26 +492,53 @@ mod tests {
         assert_eq!(map.npcs.len(), 2);
         assert_eq!(
             map.npcs[0],
-            NPCObject { id: 7, x: 12, y: 7, sprite_id: 0, script: "@test_house".into() }
+            NPCObject {
+                id: 7,
+                x: 12,
+                y: 7,
+                sprite_id: 0,
+                script: "@test_house".into()
+            }
         );
         assert_eq!(
             map.npcs[1],
-            NPCObject { id: 9, x: 4, y: 4, sprite_id: 0, script: "@test_teleport".into() }
+            NPCObject {
+                id: 9,
+                x: 4,
+                y: 4,
+                sprite_id: 0,
+                script: "@test_teleport".into()
+            }
         );
 
         // Scripts keep text from the `script` property.
         assert_eq!(map.scripts.len(), 5);
         assert_eq!(
             map.scripts[0],
-            ScriptObject { id: 5, x: 0, y: 4, script: "tpif @test_teleport @test_house;".into() }
+            ScriptObject {
+                id: 5,
+                x: 0,
+                y: 4,
+                script: "tpif @test_teleport @test_house;".into()
+            }
         );
         assert_eq!(
             map.scripts[1],
-            ScriptObject { id: 6, x: 8, y: 4, script: "tpif @test_house @test_teleport;".into() }
+            ScriptObject {
+                id: 6,
+                x: 8,
+                y: 4,
+                script: "tpif @test_house @test_teleport;".into()
+            }
         );
         assert_eq!(
             map.scripts[4],
-            ScriptObject { id: 16, x: 2, y: 3, script: "tmsg 1 2 {who art thee};".into() }
+            ScriptObject {
+                id: 16,
+                x: 2,
+                y: 3,
+                script: "tmsg 1 2 {who art thee};".into()
+            }
         );
         assert!(map.collision_types.is_empty());
         assert!(map.encounter_zones.is_empty());

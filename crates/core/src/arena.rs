@@ -5,7 +5,7 @@
 //! source bytes, rather than resolved FX addresses: address resolution belongs
 //! to `fxdata-build.py` and changes with the surrounding image.
 
-use crate::builder::{verify_byte_parity, BuildError};
+use crate::builder::{BuildError, verify_byte_parity};
 use std::path::Path;
 use std::process::Command;
 

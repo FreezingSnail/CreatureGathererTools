@@ -160,7 +160,10 @@ fn artifact_paths(cfg: &Config, names: &[&str]) -> Vec<String> {
 fn build_error(e: anyhow::Error) -> CompileResult {
     CompileResult {
         ok: false,
-        errors: vec![CompileError { line: 0, msg: e.to_string() }],
+        errors: vec![CompileError {
+            line: 0,
+            msg: e.to_string(),
+        }],
         artifacts: vec![],
     }
 }
@@ -228,7 +231,10 @@ fn compile_map(state: State<Mutex<AppState>>) -> CompileResult {
         Err(_) => {
             return CompileResult {
                 ok: false,
-                errors: vec![CompileError { line: 0, msg: "state lock poisoned".into() }],
+                errors: vec![CompileError {
+                    line: 0,
+                    msg: "state lock poisoned".into(),
+                }],
                 artifacts: vec![],
             }
         }
@@ -245,7 +251,10 @@ fn compile_all(state: State<Mutex<AppState>>) -> CompileResult {
         Err(_) => {
             return CompileResult {
                 ok: false,
-                errors: vec![CompileError { line: 0, msg: "state lock poisoned".into() }],
+                errors: vec![CompileError {
+                    line: 0,
+                    msg: "state lock poisoned".into(),
+                }],
                 artifacts: vec![],
             }
         }
@@ -313,7 +322,10 @@ fn cmd_json(cmd: &Cmd) -> CmdJson {
             args.push(loc_arg(from));
             args.push(loc_arg(to));
         }
-        Cmd::If { condition, branches } => {
+        Cmd::If {
+            condition,
+            branches,
+        } => {
             args.push(cond_arg(condition));
             match branches {
                 Branch::Then(_) => args.push("then".into()),
@@ -342,7 +354,11 @@ fn parse_script_impl(src: &str) -> ParseResult {
         },
         Err(e) => ParseResult {
             ok: false,
-            errors: vec![ScriptErr { line: e.line, col: e.col, msg: e.msg }],
+            errors: vec![ScriptErr {
+                line: e.line,
+                col: e.col,
+                msg: e.msg,
+            }],
             cmds: None,
         },
     }
@@ -477,15 +493,23 @@ mod tests {
     #[test]
     fn cmd_json_cords_and_if() {
         let msg = Cmd::Msg {
-            text: Text { text: "hi".into(), index: 0 },
+            text: Text {
+                text: "hi".into(),
+                index: 0,
+            },
         };
         assert_eq!(cmd_json(&msg).args, vec!["hi"]);
 
-        let tp = Cmd::Tp { to: Location::Cords(1, 2) };
+        let tp = Cmd::Tp {
+            to: Location::Cords(1, 2),
+        };
         assert_eq!(cmd_json(&tp).args, vec!["(1,2)"]);
 
         let ifc = Cmd::If {
-            condition: Condition::FlagSet(Text { text: "flag_a".into(), index: 0 }),
+            condition: Condition::FlagSet(Text {
+                text: "flag_a".into(),
+                index: 0,
+            }),
             branches: Branch::Then(Box::new(msg.clone())),
         };
         let j = cmd_json(&ifc);
@@ -498,7 +522,10 @@ mod tests {
     fn compile_result_serializes_fields() {
         let r = CompileResult {
             ok: false,
-            errors: vec![CompileError { line: 2, msg: "boom".into() }],
+            errors: vec![CompileError {
+                line: 2,
+                msg: "boom".into(),
+            }],
             artifacts: vec!["out/x.bin".into()],
         };
         let v = serde_json::to_value(&r).unwrap();
@@ -512,7 +539,11 @@ mod tests {
     fn parse_result_serializes_fields() {
         let r = ParseResult {
             ok: false,
-            errors: vec![ScriptErr { line: 1, col: 3, msg: "bad".into() }],
+            errors: vec![ScriptErr {
+                line: 1,
+                col: 3,
+                msg: "bad".into(),
+            }],
             cmds: None,
         };
         let v = serde_json::to_value(&r).unwrap();
@@ -562,7 +593,10 @@ mod tests {
         // Sanity: the Cmd -> bytecode path still matches core expectations
         // (opcode 0 for Msg, u16 text index).
         let cmd = Cmd::Msg {
-            text: Text { text: "hi".into(), index: 3 },
+            text: Text {
+                text: "hi".into(),
+                index: 3,
+            },
         };
         assert_eq!(cmd.to_bytes(), vec![0, 0, 3]);
     }

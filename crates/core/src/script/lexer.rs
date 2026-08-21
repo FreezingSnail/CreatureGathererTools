@@ -185,7 +185,9 @@ impl Lexer {
                 Ok(n) => Ok(Token::new(TokenKind::Number(n), line, col)),
                 Err(msg) => Err(crate::script::ScriptError { line, col, msg }),
             },
-            c if c.is_alphabetic() || c == '_' => Ok(Token::new(TokenKind::Ident(self.read_ident()), line, col)),
+            c if c.is_alphabetic() || c == '_' => {
+                Ok(Token::new(TokenKind::Ident(self.read_ident()), line, col))
+            }
             c => {
                 self.advance();
                 Err(crate::script::ScriptError {
@@ -226,7 +228,12 @@ mod tests {
         let cases: Vec<(&str, Vec<TokenKind>)> = vec![
             (
                 "msg {hello};",
-                vec![ident("msg"), TokenKind::Text("hello".into()), TokenKind::Semicolon, TokenKind::Eof],
+                vec![
+                    ident("msg"),
+                    TokenKind::Text("hello".into()),
+                    TokenKind::Semicolon,
+                    TokenKind::Eof,
+                ],
             ),
             (
                 "tpif @loc1 @loc2;",

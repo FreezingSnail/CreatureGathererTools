@@ -49,7 +49,9 @@ fn load_creatures() -> Vec<creaturevm::model::Creature> {
         output_dir: String::new(),
         fixture_dir: None,
     };
-    Store::new(&cfg).load_creatures().expect("creatures fixture parses")
+    Store::new(&cfg)
+        .load_creatures()
+        .expect("creatures fixture parses")
 }
 
 fn load_moves() -> Vec<creaturevm::model::Move> {
@@ -151,10 +153,11 @@ fn map_pipeline_all_commands_matches_go_bytes() {
     expected_scripts[chunk_base(0)..chunk_base(0) + 7].copy_from_slice(&[0, 0, 0, 6, 0, 0, 0xFF]);
     // chunk 32: If + TpIf + ReadFlag + SMsg
     let chunk32: &[u8] = &[
-        5, 0, 0, 1, 0, 3, 0, 0, 1, 0, 0, 2, // if flag_A then msg{IfA}(idx1) else msg{IfB}(idx2)
+        5, 0, 0, 1, 0, 3, 0, 0, 1, 0, 0,
+        2, // if flag_A then msg{IfA}(idx1) else msg{IfB}(idx2)
         4, 0, 7, 0, 8, 0, 9, 0, 10, // tpif 7 8 9 10
         8, 0, 2, // readflag flag_f2 (idx 2)
-        2, 0, 3, 0, 4, 0, 3, // smsg 3 4 {Secret} (idx 3)
+        2, 0, 3, 0, 4, 0, 3,    // smsg 3 4 {Secret} (idx 3)
         0xFF, // End
     ];
     expected_scripts[chunk_base(32)..chunk_base(32) + chunk32.len()].copy_from_slice(chunk32);
@@ -162,7 +165,7 @@ fn map_pipeline_all_commands_matches_go_bytes() {
     let chunk33: &[u8] = &[
         1, 0, 10, 0, 20, 0, 0, // tmsg 10 20 {Hello}(idx 0)
         7, 0, 0, // unsetflag flag_f1 (idx 0)
-        3, 0, 5, 0, 6, // tp 5 6
+        3, 0, 5, 0, 6,    // tp 5 6
         0xFF, // End
     ];
     expected_scripts[chunk_base(33)..chunk_base(33) + chunk33.len()].copy_from_slice(chunk33);

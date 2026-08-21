@@ -3,6 +3,7 @@ pub mod builder;
 pub mod cli;
 pub mod config;
 pub mod fixtures;
+pub mod manifest;
 pub mod model;
 pub mod parser;
 pub mod processor;
@@ -190,6 +191,40 @@ fn run_project_with_options(
         fixtures::emit_fixtures(&processed, fixture_dir)
             .with_context(|| format!("Writing fixtures to {fixture_dir}"))?;
     }
+
+    let creature_source = Path::new(&cfg.creatures_json);
+    let move_source = Path::new(&cfg.moves_json);
+    let map_source = Path::new(&cfg.map_json);
+    let output_dir = Path::new(&cfg.output_dir);
+    let mut artifact_inputs = vec![
+        manifest::ArtifactInput::in_output(output_dir, "creatureData.bin", creature_source),
+        manifest::ArtifactInput::in_output(output_dir, "creatureData.hpp", creature_source),
+        manifest::ArtifactInput::in_output(output_dir, "moves.bin", move_source),
+        manifest::ArtifactInput::in_output(output_dir, "moves.hpp", move_source),
+        manifest::ArtifactInput::in_output(output_dir, "creatureData.txt", creature_source),
+        manifest::ArtifactInput::in_output(output_dir, "movedata.txt", move_source),
+        manifest::ArtifactInput::in_output(output_dir, "opponents.txt", &opponents_csv),
+        manifest::ArtifactInput::in_output(output_dir, "raw_map.bin", map_source),
+        manifest::ArtifactInput::in_output(output_dir, "scripts.bin", map_source),
+        manifest::ArtifactInput::in_output(output_dir, "text.bin", map_source),
+        manifest::ArtifactInput::in_output(output_dir, "opcodes.hpp", map_source),
+        manifest::ArtifactInput::in_output(output_dir, "flags.hpp", map_source),
+        manifest::ArtifactInput::in_output(output_dir, "flag_bit_array.hpp", map_source),
+        manifest::ArtifactInput::in_output(output_dir, "flag_bit_array.cpp", map_source),
+        manifest::ArtifactInput::in_output(output_dir, "locations.hpp", map_source),
+        manifest::ArtifactInput::in_output(output_dir, "scripts.hpp", map_source),
+    ];
+    if canonical_creature.is_file() {
+        let canonical = canonical_creature
+            .canonicalize()
+            .with_context(|| format!("Resolving {}", canonical_creature.display()))?;
+        artifact_inputs.push(manifest::ArtifactInput::external(
+            &canonical,
+            creature_source,
+        ));
+    }
+    manifest::emit(output_dir, &artifact_inputs)
+        .with_context(|| format!("Writing manifest in {}", cfg.output_dir))?;
 
     Ok(())
 }

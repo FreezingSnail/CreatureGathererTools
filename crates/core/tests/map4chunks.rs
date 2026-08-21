@@ -11,8 +11,14 @@ use creaturevm::store::Store;
 use creaturevm::tiled;
 
 const TD: &str = env!("CARGO_MANIFEST_DIR");
-const CANONICAL: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/test_map_4chunks.json");
-const TILED: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/test_map_4chunks_tiled.json");
+const CANONICAL: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/testdata/test_map_4chunks.json"
+);
+const TILED: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/testdata/test_map_4chunks_tiled.json"
+);
 
 fn fixture_cfg() -> Config {
     Config {
@@ -58,14 +64,57 @@ fn tiled_interchange_imports() {
 
     // Pixel -> tile: floor(px/16).
     assert_eq!(m.scripts.len(), 6);
-    assert_eq!(m.scripts[0], ScriptObject { id: 1, x: 5, y: 2, script: "if flag_door then setflag flag_door_used else setflag flag_door endif".into() });
-    assert_eq!(m.scripts[4], ScriptObject { id: 5, x: 8, y: 4, script: "msg {Sound the horn?}; readflag flag_door".into() });
+    assert_eq!(
+        m.scripts[0],
+        ScriptObject {
+            id: 1,
+            x: 5,
+            y: 2,
+            script: "if flag_door then setflag flag_door_used else setflag flag_door endif".into()
+        }
+    );
+    assert_eq!(
+        m.scripts[4],
+        ScriptObject {
+            id: 5,
+            x: 8,
+            y: 4,
+            script: "msg {Sound the horn?}; readflag flag_door".into()
+        }
+    );
 
     // Locations carry their @name in the script field (round-trip design).
     assert_eq!(m.npcs.len(), 3);
-    assert_eq!(m.npcs[0], NPCObject { id: 7, x: 1, y: 1, sprite_id: 0, script: "@start".into() });
-    assert_eq!(m.npcs[1], NPCObject { id: 8, x: 8, y: 4, sprite_id: 0, script: "@hop".into() });
-    assert_eq!(m.npcs[2], NPCObject { id: 9, x: 14, y: 6, sprite_id: 0, script: "@chest".into() });
+    assert_eq!(
+        m.npcs[0],
+        NPCObject {
+            id: 7,
+            x: 1,
+            y: 1,
+            sprite_id: 0,
+            script: "@start".into()
+        }
+    );
+    assert_eq!(
+        m.npcs[1],
+        NPCObject {
+            id: 8,
+            x: 8,
+            y: 4,
+            sprite_id: 0,
+            script: "@hop".into()
+        }
+    );
+    assert_eq!(
+        m.npcs[2],
+        NPCObject {
+            id: 9,
+            x: 14,
+            y: 6,
+            sprite_id: 0,
+            script: "@chest".into()
+        }
+    );
 
     // No collision/encounter data in Tiled -> synthesized defaults.
     assert_eq!(m.collision, vec![vec![0u8; 16]; 8]);
@@ -88,7 +137,11 @@ fn scripts_land_in_four_chunks() {
     // scripts.bin = 2048 chunks x 128 bytes; chunk index = (y/4)*32 + (x/8).
     const CHUNK_SIZE: usize = 128;
     let nonempty: Vec<usize> = (0..(a.scripts_bin.len() / CHUNK_SIZE))
-        .filter(|i| a.scripts_bin[i * CHUNK_SIZE..(i + 1) * CHUNK_SIZE].iter().any(|&b| b != 0))
+        .filter(|i| {
+            a.scripts_bin[i * CHUNK_SIZE..(i + 1) * CHUNK_SIZE]
+                .iter()
+                .any(|&b| b != 0)
+        })
         .collect();
     assert_eq!(nonempty, vec![0, 1, 32, 33], "expected the 2x2 chunk grid");
 
@@ -97,7 +150,10 @@ fn scripts_land_in_four_chunks() {
     // Every non-empty chunk ends with an End (0xFF) sentinel.
     for &ci in &nonempty {
         let chunk = &a.scripts_bin[ci * CHUNK_SIZE..(ci + 1) * CHUNK_SIZE];
-        let last = chunk.iter().rposition(|&b| b != 0).expect("non-empty chunk");
+        let last = chunk
+            .iter()
+            .rposition(|&b| b != 0)
+            .expect("non-empty chunk");
         assert_eq!(chunk[last], 0xFF, "chunk {ci} missing End sentinel");
     }
 
