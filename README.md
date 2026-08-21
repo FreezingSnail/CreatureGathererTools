@@ -51,7 +51,14 @@ screenshots/        App screenshots
 # Rust core + shell
 cargo build                                   # workspace: crates/core + src-tauri
 cargo test                                    # unit + integration tests
-cargo run -p cgfx-core -- <input.json> <output_dir>   # CLI only, no UI
+cargo run -p cgfx-core --bin cgfx-tools -- <input.json> <output_dir>  # CLI only, no UI
+cargo run -p cgfx-core --bin cgfx-tools -- --version                 # version stamp
+
+# Release cgfx-tools (tag must match the Cargo package version, prefixed with v)
+git tag v0.1.0 && git push origin v0.1.0
+# GitHub Release assets: cgfx-tools-macos-arm64, cgfx-tools-linux-x64,
+# plus <asset>.sha256 for each asset. `cgfx-tools --version` prints
+# `cgfx-tools 0.1.0`; the numeric version matches the release tag.
 
 # React frontend (from ui/)
 npm install

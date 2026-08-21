@@ -1,0 +1,53 @@
+name: Release cgfx-tools
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.asset }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            asset: cgfx-tools-macos-arm64
+          - os: ubuntu-latest
+            asset: cgfx-tools-linux-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build release binary
+        run: cargo build --locked --release -p cgfx-core --bin cgfx-tools
+      - name: Stage release asset and checksum
+        shell: bash
+        run: |
+          mkdir -p release
+          cp target/release/cgfx-tools release/${{ matrix.asset }}
+          chmod +x release/${{ matrix.asset }}
+          shasum -a 256 release/${{ matrix.asset }} > release/${{ matrix.asset }}.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: release/
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" --generate-notes release/*

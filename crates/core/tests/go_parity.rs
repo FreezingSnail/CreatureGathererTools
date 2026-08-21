@@ -47,6 +47,7 @@ fn load_creatures() -> Vec<creaturevm::model::Creature> {
         map_tileset_png: String::new(),
         npc_tileset_png: String::new(),
         output_dir: String::new(),
+        fixture_dir: None,
     };
     Store::new(&cfg).load_creatures().expect("creatures fixture parses")
 }
@@ -60,6 +61,7 @@ fn load_moves() -> Vec<creaturevm::model::Move> {
         map_tileset_png: String::new(),
         npc_tileset_png: String::new(),
         output_dir: String::new(),
+        fixture_dir: None,
     };
     Store::new(&cfg).load_moves().expect("moves fixture parses")
 }

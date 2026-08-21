@@ -43,18 +43,19 @@ impl<'a> Store<'a> {
 
 fn load_json<T: serde::de::DeserializeOwned>(path: impl AsRef<Path>) -> anyhow::Result<T> {
     let path = path.as_ref();
-    let data = std::fs::read(path).map_err(|e| {
-        anyhow::anyhow!("reading {}: {e}", path.display())
-    })?;
+    let data =
+        std::fs::read(path).map_err(|e| anyhow::anyhow!("reading {}: {e}", path.display()))?;
     serde_json::from_slice(&data).map_err(|e| anyhow::anyhow!("parsing {}: {e}", path.display()))
 }
 
-fn save_json<T: serde::Serialize + ?Sized>(path: impl AsRef<Path>, value: &T) -> anyhow::Result<()> {
+fn save_json<T: serde::Serialize + ?Sized>(
+    path: impl AsRef<Path>,
+    value: &T,
+) -> anyhow::Result<()> {
     let path = path.as_ref();
     let data = serde_json::to_string_pretty(value)
         .map_err(|e| anyhow::anyhow!("serializing {}: {e}", path.display()))?;
-    std::fs::write(path, data)
-        .map_err(|e| anyhow::anyhow!("writing {}: {e}", path.display()))
+    std::fs::write(path, data).map_err(|e| anyhow::anyhow!("writing {}: {e}", path.display()))
 }
 
 #[cfg(test)]
@@ -76,6 +77,7 @@ mod tests {
             map_tileset_png: String::new(),
             npc_tileset_png: String::new(),
             output_dir: String::new(),
+            fixture_dir: None,
         }
     }
 
@@ -166,10 +168,7 @@ mod tests {
 
     #[test]
     fn roundtrip_creatures() {
-        seed_roundtrip(
-            CREATURES,
-            &roundtrip_cfg("creatures").creatures_json,
-        );
+        seed_roundtrip(CREATURES, &roundtrip_cfg("creatures").creatures_json);
         let c = roundtrip_cfg("creatures");
         let s = Store::new(&c);
         let orig = s.load_creatures().unwrap();
@@ -213,6 +212,7 @@ mod tests {
             map_tileset_png: String::new(),
             npc_tileset_png: String::new(),
             output_dir: String::new(),
+            fixture_dir: None,
         };
         let s = Store::new(&c);
         assert!(s.load_creatures().is_err(), "expected error");
@@ -224,9 +224,7 @@ mod tests {
     /// serde must do the same instead of erroring on missing fields.
     #[test]
     fn load_partial_map_defaults_missing_grids() {
-        let partial = format!(
-            "{TD}/testdata/roundtrip_partial_map.json"
-        );
+        let partial = format!("{TD}/testdata/roundtrip_partial_map.json");
         std::fs::write(
             &partial,
             r#"{"width":16,"height":16,"tiles":[],"npcs":[],"scripts":[]}"#,
@@ -240,6 +238,7 @@ mod tests {
             map_tileset_png: String::new(),
             npc_tileset_png: String::new(),
             output_dir: String::new(),
+            fixture_dir: None,
         };
         let s = Store::new(&c);
         let m = s.load_map().expect("partial map must load like Go");
@@ -261,6 +260,7 @@ mod tests {
             map_tileset_png: String::new(),
             npc_tileset_png: String::new(),
             output_dir: String::new(),
+            fixture_dir: None,
         };
         let s = Store::new(&c);
         assert!(s.load_map().is_err(), "expected error");
@@ -305,8 +305,8 @@ mod tests {
         let v: serde_json::Value = serde_json::to_value(&c).unwrap();
         let o = v.as_object().unwrap();
         for key in [
-            "name", "id", "type1", "type2", "evelevel", "atk", "deff", "spcatk", "spcdef",
-            "hp", "spd", "move1", "move2", "move3", "move4", "moveList",
+            "name", "id", "type1", "type2", "evelevel", "atk", "deff", "spcatk", "spcdef", "hp",
+            "spd", "move1", "move2", "move3", "move4", "moveList",
         ] {
             assert!(o.contains_key(key), "missing key {key}");
         }

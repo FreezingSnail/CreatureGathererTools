@@ -23,6 +23,7 @@ fn fixture_cfg() -> Config {
         map_tileset_png: String::new(),
         npc_tileset_png: String::new(),
         output_dir: format!("{TD}/testdata/builder_out/map4chunks"),
+        fixture_dir: None,
     }
 }
 

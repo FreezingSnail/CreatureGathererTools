@@ -1,0 +1,8 @@
+{
+  "moves_json": "moves.json",
+  "map_json": "map.json",
+  "tileset_png": "tileset.png",
+  "map_tileset_png": "map_tileset.png",
+  "npc_tileset_png": "npc_tileset.png",
+  "output_dir": "out"
+}

@@ -8,7 +8,7 @@ name = "creaturevm"
 path = "src/lib.rs"
 
 [[bin]]
-name = "pokervm-rust"
+name = "cgfx-tools"
 path = "src/main.rs"
 
 [dependencies]

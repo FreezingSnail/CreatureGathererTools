@@ -5,5 +5,6 @@
   "tileset_png": "tileset.png",
   "map_tileset_png": "map_tileset.png",
   "npc_tileset_png": "npc_tileset.png",
-  "output_dir": "out"
+  "output_dir": "builder_out/project",
+  "fixture_dir": "fixtures"
 }

@@ -159,8 +159,20 @@ pub fn build_creatures(creatures: &[Creature]) -> Result<(Vec<u8>, String), Buil
         ]);
         table.push_str(&format!(
             "    {{{}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}}},\n",
-            c.id, t1, t2, c.evo_level, c.atk, c.def, c.spc_atk, c.spc_def, c.hp, c.spd,
-            c.move1, c.move2, c.move3, c.move4
+            c.id,
+            t1,
+            t2,
+            c.evo_level,
+            c.atk,
+            c.def,
+            c.spc_atk,
+            c.spc_def,
+            c.hp,
+            c.spd,
+            c.move1,
+            c.move2,
+            c.move3,
+            c.move4
         ));
     }
     table.push_str("    };\n\n}\n");
@@ -173,18 +185,23 @@ pub fn build_moves(moves: &[Move]) -> Result<(Vec<u8>, String), BuildError> {
     let mut bin = Vec::with_capacity(moves.len() * 4);
     let mut hpp = String::from("namespace MoveData {\n");
     for m in moves {
-        let t = move_type_index(&m.r#type)
-            .ok_or_else(|| BuildError(format!("unknown move type {:?} for move {}", m.r#type, m.name)))?;
+        let t = move_type_index(&m.r#type).ok_or_else(|| {
+            BuildError(format!(
+                "unknown move type {:?} for move {}",
+                m.r#type, m.name
+            ))
+        })?;
         let acc = accuracy_index(m.accuracy);
-        let packed = ((t as u16) << 12)
-            | ((m.power as u16) << 7)
-            | ((m.physical as u16) << 6)
-            | (acc << 4);
+        let packed =
+            ((t as u16) << 12) | ((m.power as u16) << 7) | ((m.physical as u16) << 6) | (acc << 4);
         let eff = effect_index(&m.effect).unwrap_or(0xFF);
         bin.extend_from_slice(&packed.to_be_bytes());
         bin.push(eff);
         bin.push(0xFF); // effect2 always NONE
-        hpp.push_str(&format!("    uint8_t move{}[] = \"{}\\0\";\n", m.id, m.name));
+        hpp.push_str(&format!(
+            "    uint8_t move{}[] = \"{}\\0\";\n",
+            m.id, m.name
+        ));
     }
     hpp.push_str("\n    uint24_t moveNames[] = {\n        ");
     for (i, m) in moves.iter().enumerate() {
@@ -317,7 +334,8 @@ fn name_id_hpp(header: &str, table: &HashMap<String, u16>, prefix: &str) -> Stri
 /// Note: the compiled blob does NOT include the trailing 0xFF End that is
 /// appended only inside `scripts.bin`.
 fn scripts_hpp_text(blobs: &[Vec<u8>], scripts: &[String]) -> String {
-    let mut h = String::from("#pragma once\n#include <stdint.h>\n// Auto-generated – DO NOT EDIT\n\n");
+    let mut h =
+        String::from("#pragma once\n#include <stdint.h>\n// Auto-generated – DO NOT EDIT\n\n");
     for (i, blob) in blobs.iter().enumerate() {
         if blob.is_empty() {
             continue;
@@ -326,7 +344,11 @@ fn scripts_hpp_text(blobs: &[Vec<u8>], scripts: &[String]) -> String {
             h.push_str(&format!("// {}\n", scripts[i]));
         }
         let nums: Vec<String> = blob.iter().map(|b| b.to_string()).collect();
-        h.push_str(&format!("uint8_t blob{}[] = {{ {} }};\n", i, nums.join(",")));
+        h.push_str(&format!(
+            "uint8_t blob{}[] = {{ {} }};\n",
+            i,
+            nums.join(",")
+        ));
     }
     h
 }
@@ -502,6 +524,7 @@ mod tests {
             map_tileset_png: String::new(),
             npc_tileset_png: String::new(),
             output_dir: format!("{TD}/testdata/builder_out/{output_dir}"),
+            fixture_dir: None,
         }
     }
 
@@ -690,8 +713,7 @@ mod tests {
         let cfg = fixture_cfg("creatures");
         let creatures = fixture_creatures();
         write_creatures(&cfg, &creatures).expect("write");
-        let bin = std::fs::read(format!("{}/creatureData.bin", cfg.output_dir))
-            .expect("read bin");
+        let bin = std::fs::read(format!("{}/creatureData.bin", cfg.output_dir)).expect("read bin");
         let hpp = std::fs::read_to_string(format!("{}/creatureData.hpp", cfg.output_dir))
             .expect("read hpp");
         assert_eq!(bin, EXPECTED_CREATURES_BIN.to_vec());
@@ -774,7 +796,10 @@ mod tests {
         }];
         let a = build_map(&m).expect("build");
         let chunk_base = 0 * CHUNK_SIZE;
-        assert_eq!(a.scripts_bin[chunk_base], 0, "expected Msg opcode 0 at chunk 0");
+        assert_eq!(
+            a.scripts_bin[chunk_base], 0,
+            "expected Msg opcode 0 at chunk 0"
+        );
         assert_eq!(&a.scripts_bin[chunk_base..chunk_base + 4], &[0, 0, 0, 0xFF]);
     }
 
@@ -791,14 +816,10 @@ mod tests {
         let a = build_map(&m).expect("build");
         let chunk_base = 33 * CHUNK_SIZE;
         assert_eq!(
-            a.scripts_bin[chunk_base],
-            6,
+            a.scripts_bin[chunk_base], 6,
             "expected SetFlag opcode 6 at chunk 33"
         );
-        assert_eq!(
-            &a.scripts_bin[chunk_base..chunk_base + 4],
-            &[6, 0, 0, 0xFF]
-        );
+        assert_eq!(&a.scripts_bin[chunk_base..chunk_base + 4], &[6, 0, 0, 0xFF]);
     }
 
     #[test]
@@ -842,10 +863,26 @@ mod tests {
     fn build_map_empty_scripts_skipped() {
         let mut m = empty_map();
         m.scripts = vec![
-            ScriptObject { id: 1, x: 0, y: 0, script: String::new() },
-            ScriptObject { id: 2, x: 0, y: 0, script: "msg {Hi}".to_string() },
+            ScriptObject {
+                id: 1,
+                x: 0,
+                y: 0,
+                script: String::new(),
+            },
+            ScriptObject {
+                id: 2,
+                x: 0,
+                y: 0,
+                script: "msg {Hi}".to_string(),
+            },
         ];
-        m.npcs = vec![NPCObject { id: 3, x: 0, y: 0, sprite_id: 1, script: "".to_string() }];
+        m.npcs = vec![NPCObject {
+            id: 3,
+            x: 0,
+            y: 0,
+            sprite_id: 1,
+            script: "".to_string(),
+        }];
         let a = build_map(&m).expect("build");
         assert_eq!(&a.scripts_bin[..4], &[0, 0, 0, 0xFF]);
         assert_eq!(a.scripts_bin[4], 0, "rest of chunk stays zero-padded");
@@ -969,13 +1006,14 @@ mod tests {
         let script = std::iter::repeat_n("msg {xxxxxxxxxx}".to_string(), 45)
             .collect::<Vec<_>>()
             .join("; ");
-        m.scripts = vec![ScriptObject { id: 1, x: 0, y: 0, script }];
+        m.scripts = vec![ScriptObject {
+            id: 1,
+            x: 0,
+            y: 0,
+            script,
+        }];
         let err = build_map(&m).expect_err("must fail");
-        assert!(
-            err.0.contains("chunk 0 too large"),
-            "err: {}",
-            err.0
-        );
+        assert!(err.0.contains("chunk 0 too large"), "err: {}", err.0);
     }
 
     #[test]
@@ -1027,8 +1065,18 @@ mod tests {
             script: "msg {Hi}".to_string(),
         }];
         m.scripts = vec![
-            ScriptObject { id: 20, x: 8, y: 4, script: "setflag flag_myflag".to_string() },
-            ScriptObject { id: 21, x: 240, y: 12, script: "msg {Bye}".to_string() },
+            ScriptObject {
+                id: 20,
+                x: 8,
+                y: 4,
+                script: "setflag flag_myflag".to_string(),
+            },
+            ScriptObject {
+                id: 21,
+                x: 240,
+                y: 12,
+                script: "msg {Bye}".to_string(),
+            },
         ];
         let a = build_map(&m).expect("build");
 
@@ -1036,7 +1084,10 @@ mod tests {
         assert_eq!(a.raw_map.len(), 131072);
         assert_eq!(&a.raw_map[0..2], &[5, 0]);
         assert_eq!(&a.raw_map[2..4], &[0x02, 0x01]);
-        assert_eq!(&a.raw_map[(3 * 256 + 10) * 2..(3 * 256 + 10) * 2 + 2], &[0xFF, 0xFF]);
+        assert_eq!(
+            &a.raw_map[(3 * 256 + 10) * 2..(3 * 256 + 10) * 2 + 2],
+            &[0xFF, 0xFF]
+        );
         assert_eq!(a.raw_map[4], 0);
         assert_eq!(&a.raw_map[131070..], &[0, 0]);
 

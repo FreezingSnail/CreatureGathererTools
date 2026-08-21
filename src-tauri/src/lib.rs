@@ -385,6 +385,7 @@ fn default_config() -> Config {
         map_tileset_png: String::new(),
         npc_tileset_png: String::new(),
         output_dir: String::new(),
+        fixture_dir: None,
     }
 }
 
@@ -530,6 +531,7 @@ mod tests {
             map_tileset_png: String::new(),
             npc_tileset_png: String::new(),
             output_dir: "out".into(),
+            fixture_dir: None,
         };
         let paths = artifact_paths(&cfg, &MAP_ARTIFACTS);
         assert_eq!(paths.len(), 9);
@@ -547,6 +549,7 @@ mod tests {
             map_tileset_png: String::new(),
             npc_tileset_png: String::new(),
             output_dir: "out".into(),
+            fixture_dir: None,
         };
         let r = compile_map_impl(&cfg);
         assert!(!r.ok);
