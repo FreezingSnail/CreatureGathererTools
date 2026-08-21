@@ -77,6 +77,184 @@ fn move_type_index(ty: &str) -> Option<u16> {
         .or_else(|| (ty == "none").then_some(MOVE_TYPE_NONE))
 }
 
+/// One type-effectiveness cell. Values match `type_table_data.py` exactly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TypeEffectiveness {
+    None,
+    Half,
+    Same,
+    Double,
+}
+
+impl TypeEffectiveness {
+    fn byte(self) -> u8 {
+        match self {
+            Self::None => 0,
+            Self::Half => 2,
+            Self::Same => 3,
+            Self::Double => 4,
+        }
+    }
+
+    fn parse(value: &str) -> Result<Self, BuildError> {
+        match value.trim().parse::<f32>() {
+            Ok(0.0) => Ok(Self::None),
+            Ok(0.5) => Ok(Self::Half),
+            Ok(1.0) => Ok(Self::Same),
+            Ok(2.0) => Ok(Self::Double),
+            Ok(_) | Err(_) => Err(BuildError(format!(
+                "unknown type effectiveness modifier {value:?}; expected 0, 0.5, 1, or 2"
+            ))),
+        }
+    }
+}
+
+/// A named row in `data/typetable.csv`. The name is retained so repeated names
+/// replace their prior row, as assignment to Python's `dict` does.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypeTableRow {
+    pub name: String,
+    pub modifiers: Vec<TypeEffectiveness>,
+}
+
+/// Parsed source model for the legacy tab-separated type table.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TypeTable {
+    pub rows: Vec<TypeTableRow>,
+}
+
+/// Loads `data/typetable.csv`, matching `type_table_data.py`: skip the header,
+/// parse tab-separated modifiers, and preserve the Python dictionary row order.
+pub fn load_type_table(path: impl AsRef<Path>) -> Result<TypeTable, BuildError> {
+    let path = path.as_ref();
+    let source = std::fs::read_to_string(path).map_err(|e| io_err("reading", path, e))?;
+    let mut lines = source.lines();
+    lines
+        .next()
+        .ok_or_else(|| BuildError(format!("reading {}: missing header", path.display())))?;
+
+    let mut table = TypeTable::default();
+    for (line_number, line) in lines.enumerate() {
+        if line.is_empty() {
+            continue;
+        }
+        let mut fields = line.split('\t');
+        let name = fields
+            .next()
+            .filter(|name| !name.is_empty())
+            .ok_or_else(|| {
+                BuildError(format!(
+                    "reading {}: empty type at line {}",
+                    path.display(),
+                    line_number + 2
+                ))
+            })?;
+        let modifiers = fields
+            .map(TypeEffectiveness::parse)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| {
+                BuildError(format!(
+                    "reading {} line {}: {e}",
+                    path.display(),
+                    line_number + 2
+                ))
+            })?;
+        let row = TypeTableRow {
+            name: name.to_owned(),
+            modifiers,
+        };
+        if let Some(index) = table.rows.iter().position(|old| old.name == row.name) {
+            table.rows[index] = row;
+        } else {
+            table.rows.push(row);
+        }
+    }
+    Ok(table)
+}
+
+/// Builds `typetable.bin` in the byte order emitted by
+/// `tools/data_converters/type_table_data.py`.
+pub fn build_type_table(table: &TypeTable) -> Vec<u8> {
+    table
+        .rows
+        .iter()
+        .flat_map(|row| row.modifiers.iter().copied().map(TypeEffectiveness::byte))
+        .collect()
+}
+
+/// Writes `typetable.bin` into an artifact directory.
+pub fn write_type_table(output_dir: impl AsRef<Path>, table: &TypeTable) -> Result<(), BuildError> {
+    let output_dir = output_dir.as_ref();
+    std::fs::create_dir_all(output_dir).map_err(|e| io_err("creating", output_dir, e))?;
+    write_bytes(&output_dir.join("typetable.bin"), &build_type_table(table))
+}
+
+/// Verifies a generated artifact against its reference bytes. Shared by data
+/// builders so every parity failure identifies the first divergent byte and
+/// both commands needed to reproduce it.
+pub fn verify_byte_parity(
+    artifact: &str,
+    expected: &[u8],
+    actual: &[u8],
+    expected_command: &str,
+    actual_command: &str,
+) -> Result<(), BuildError> {
+    if expected == actual {
+        return Ok(());
+    }
+
+    let offset = (0..expected.len().max(actual.len()))
+        .find(|&index| expected.get(index) != actual.get(index))
+        .expect("different byte slices have a divergent offset");
+    let display_byte = |byte: Option<&u8>| match byte {
+        Some(byte) => format!("0x{byte:02X}"),
+        None => "<EOF>".to_owned(),
+    };
+    Err(BuildError(format!(
+        "{artifact} parity mismatch at byte {offset}: expected {} from `{expected_command}`, got {} from `{actual_command}`",
+        display_byte(expected.get(offset)),
+        display_byte(actual.get(offset)),
+    )))
+}
+
+/// Runs `type_table_data.py --format fx` from the source-data project then
+/// checks its generated `typetable.bin`. `csv` must be
+/// `<project>/data/typetable.csv` so both implementations consume one source.
+pub fn verify_type_table_python_parity(
+    csv: impl AsRef<Path>,
+    rust_bytes: &[u8],
+    rust_command: &str,
+) -> Result<(), BuildError> {
+    let csv = csv.as_ref();
+    let root = csv.parent().and_then(Path::parent).ok_or_else(|| {
+        BuildError(format!(
+            "{}: expected <project>/data/typetable.csv",
+            csv.display()
+        ))
+    })?;
+    let python_command = "python3 tools/data_converters/type_table_data.py --format fx";
+    let status = std::process::Command::new("python3")
+        .args(["tools/data_converters/type_table_data.py", "--format", "fx"])
+        .current_dir(root)
+        .status()
+        .map_err(|err| BuildError(format!("running {python_command}: {err}")))?;
+    if !status.success() {
+        return Err(BuildError(format!(
+            "reference converter failed ({status}): cd {} && {python_command}",
+            root.display()
+        )));
+    }
+    let output = root.join("fxdata/generated/typetable.bin");
+    let python_bytes = std::fs::read(&output).map_err(|err| io_err("reading", &output, err))?;
+    verify_byte_parity(
+        "typetable.bin",
+        &python_bytes,
+        rust_bytes,
+        &format!("cd {} && {python_command}", root.display()),
+        rust_command,
+    )
+}
+
 /// Go `moves.go` `effectIndex`: effect name -> byte (NONE -> 0xFF).
 const EFFECT_INDEX: [(&str, u8); 31] = [
     ("NONE", 0xFF),
@@ -238,6 +416,243 @@ pub fn write_moves(cfg: &Config, moves: &[Move]) -> Result<(), BuildError> {
     std::fs::write(&bin_path, &bin).map_err(|e| io_err("writing", &bin_path, e))?;
     std::fs::write(&hpp_path, hpp).map_err(|e| io_err("writing", &hpp_path, e))?;
     Ok(())
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Opponent builder. The canonical source remains `data/opponents.csv`: it is
+// deliberately not moved to JSON because `tools/data_converters/opponent_data.py`
+// reads that same CSV. Keeping one source makes Python/Rust byte parity a direct
+// migration gate.
+//
+// Each `OpponentSeed` is three `<BBI` records (creature ID, level, packed moves)
+// and therefore exactly 18 bytes, little-endian, matching Python `struct.pack`.
+// ─────────────────────────────────────────────────────────────────────
+
+use crate::model::{OpponentPartyMember, OpponentSeed};
+use std::process::Command;
+
+const OPPONENT_CSV_COLUMNS: usize = 19;
+
+fn creature_id(name: &str) -> Option<u8> {
+    Some(match name {
+        "none" => 255,
+        "squibblesnail" => 0,
+        "squablesnail" => 1,
+        "scramblesnail" => 2,
+        "skittercrab" => 3,
+        "scattercrab" => 4,
+        "shattercrab" => 5,
+        "squid" => 6,
+        "bigsquid" => 7,
+        "biggestsquid" => 8,
+        "bell" => 9,
+        "ember" => 10,
+        "cuircuit" => 11,
+        "hedge" => 12,
+        "cloud" => 13,
+        "rock" => 14,
+        "wiggleworm" => 15,
+        "waggleworm" => 16,
+        "skimskate" => 17,
+        "skimray" => 18,
+        "billow" => 19,
+        "howl" => 20,
+        "item" => 21,
+        "item2" => 22,
+        "zip" => 23,
+        "zap" => 24,
+        "suculent" => 25,
+        "cactus" => 26,
+        "flickerfly" => 27,
+        "flitfly" => 28,
+        "dragon" => 29,
+        "skull" => 30,
+        "ardu" => 31,
+        _ => return None,
+    })
+}
+
+fn move_id(name: &str) -> Option<u8> {
+    Some(match name {
+        "none" => 255,
+        "smite" => 0,
+        "thought" => 1,
+        "wisper" => 2,
+        "blast" => 3,
+        "splash" => 4,
+        "squirt" => 5,
+        "soak" => 6,
+        "current" => 7,
+        "breeze" => 8,
+        "bellow" => 9,
+        "torrent" => 10,
+        "blow" => 11,
+        "dirtburst" => 12,
+        "slipfall" => 13,
+        "dirtfall" => 14,
+        "shatter" => 15,
+        "burn" => 16,
+        "melt" => 17,
+        "torch" => 18,
+        "stoke" => 19,
+        "bolt" => 20,
+        "plasma" => 21,
+        "coil" => 22,
+        "zap" => 23,
+        "pollen" => 24,
+        "pollenburst" => 25,
+        "seedfall" => 26,
+        "root" => 27,
+        "burst" => 28,
+        "elderBurst" => 29,
+        "slam" => 30,
+        "elderSlam" => 31,
+        _ => return None,
+    })
+}
+
+fn parse_opponent_member(
+    row: &[&str],
+    id_col: usize,
+    level_col: usize,
+    moves_col: usize,
+    line: usize,
+) -> Result<OpponentPartyMember, BuildError> {
+    let creature_id = creature_id(row[id_col])
+        .ok_or_else(|| BuildError(format!("line {line}: unknown creature {:?}", row[id_col])))?;
+    let level = row[level_col].parse::<u8>().map_err(|err| {
+        BuildError(format!(
+            "line {line}: invalid level {:?}: {err}",
+            row[level_col]
+        ))
+    })?;
+    let mut moves = 0u32;
+    for offset in 0..4 {
+        let move_id = move_id(row[moves_col + offset]).ok_or_else(|| {
+            BuildError(format!(
+                "line {line}: unknown move {:?}",
+                row[moves_col + offset]
+            ))
+        })?;
+        moves |= u32::from(move_id) << (offset * 8);
+    }
+    Ok(OpponentPartyMember {
+        creature_id,
+        level,
+        moves,
+    })
+}
+
+/// Loads the canonical Python-compatible `data/opponents.csv` schema. The
+/// name column is metadata; binary output contains only the three party slots.
+pub fn load_opponents_csv(path: impl AsRef<Path>) -> Result<Vec<OpponentSeed>, BuildError> {
+    let path = path.as_ref();
+    let text = std::fs::read_to_string(path).map_err(|e| io_err("reading", path, e))?;
+    let mut lines = text.lines();
+    let Some(header) = lines.next() else {
+        return Err(BuildError(format!(
+            "{}: missing CSV header",
+            path.display()
+        )));
+    };
+    if header.split(',').count() != OPPONENT_CSV_COLUMNS {
+        return Err(BuildError(format!(
+            "{}: expected {OPPONENT_CSV_COLUMNS} columns in CSV header",
+            path.display()
+        )));
+    }
+    lines
+        .enumerate()
+        .map(|(index, line)| {
+            let line_number = index + 2;
+            let row: Vec<_> = line.split(',').collect();
+            if row.len() != OPPONENT_CSV_COLUMNS {
+                return Err(BuildError(format!(
+                    "{}:{line_number}: expected {OPPONENT_CSV_COLUMNS} columns, found {}",
+                    path.display(),
+                    row.len()
+                )));
+            }
+            Ok(OpponentSeed {
+                first: parse_opponent_member(&row, 0, 3, 7, line_number)?,
+                second: parse_opponent_member(&row, 1, 4, 11, line_number)?,
+                third: parse_opponent_member(&row, 2, 5, 15, line_number)?,
+            })
+        })
+        .collect()
+}
+
+/// Produces `opponents.bin`: three little-endian `<BBI` records per opponent.
+pub fn build_opponents(opponents: &[OpponentSeed]) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(opponents.len() * 18);
+    for opponent in opponents {
+        for member in [opponent.first, opponent.second, opponent.third] {
+            bytes.push(member.creature_id);
+            bytes.push(member.level);
+            bytes.extend_from_slice(&member.moves.to_le_bytes());
+        }
+    }
+    bytes
+}
+
+fn parity_byte(byte: Option<u8>) -> String {
+    byte.map_or_else(|| "<end>".to_string(), |byte| format!("0x{byte:02X}"))
+}
+
+/// Compares Python (expected) and Rust (actual) output. Diagnostics are
+/// command-ready so a byte mismatch can be reproduced directly.
+pub fn compare_opponent_bytes(
+    python_bytes: &[u8],
+    rust_bytes: &[u8],
+    python_command: &str,
+    rust_command: &str,
+) -> Result<(), BuildError> {
+    let differing_offset = (0..python_bytes.len().max(rust_bytes.len()))
+        .find(|&offset| python_bytes.get(offset) != rust_bytes.get(offset));
+    match differing_offset {
+        None => Ok(()),
+        Some(offset) => Err(BuildError(format!(
+            "opponents parity mismatch at offset {offset}: expected {}, actual {}\npython: {python_command}\nrust: {rust_command}",
+            parity_byte(python_bytes.get(offset).copied()),
+            parity_byte(rust_bytes.get(offset).copied()),
+        ))),
+    }
+}
+
+/// Runs `opponent_data.py --format fx` from the source-data project then checks
+/// its `fxdata/generated/opponents.bin`. `csv` must be `<project>/data/opponents.csv`.
+pub fn verify_opponents_python_parity(
+    csv: impl AsRef<Path>,
+    rust_bytes: &[u8],
+    rust_command: &str,
+) -> Result<(), BuildError> {
+    let csv = csv.as_ref();
+    let root = csv.parent().and_then(Path::parent).ok_or_else(|| {
+        BuildError(format!(
+            "{}: expected <project>/data/opponents.csv",
+            csv.display()
+        ))
+    })?;
+    let python_command = "python3 tools/data_converters/opponent_data.py --format fx";
+    let status = Command::new("python3")
+        .args(["tools/data_converters/opponent_data.py", "--format", "fx"])
+        .current_dir(root)
+        .status()
+        .map_err(|err| BuildError(format!("running {python_command}: {err}")))?;
+    if !status.success() {
+        return Err(BuildError(format!(
+            "reference converter failed ({status}): cd {} && {python_command}",
+            root.display()
+        )));
+    }
+    let output = root.join("fxdata/generated/opponents.bin");
+    let python_bytes = std::fs::read(&output).map_err(|err| io_err("reading", &output, err))?;
+    compare_opponent_bytes(
+        &python_bytes,
+        rust_bytes,
+        &format!("cd {} && {python_command}", root.display()),
+        rust_command,
+    )
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -538,6 +953,56 @@ mod tests {
         Store::new(&cfg).load_moves().expect("fixture parses")
     }
 
+    const TYPE_TABLE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/typetable.csv");
+    // Exact output from `tools/data_converters/type_table_data.py --format fx`.
+    const EXPECTED_TYPE_TABLE_BIN: [u8; 64] = [
+        3, 3, 3, 3, 3, 3, 3, 0, 3, 3, 4, 2, 4, 3, 2, 2, 3, 3, 3, 4, 2, 2, 4, 2, 3, 4, 2, 3, 3, 4,
+        2, 2, 3, 0, 4, 2, 3, 4, 4, 3, 3, 4, 4, 0, 4, 3, 2, 3, 3, 4, 4, 4, 0, 2, 3, 3, 4, 3, 3, 3,
+        3, 3, 3, 4,
+    ];
+    const TYPE_TABLE_PYTHON_COMMAND: &str =
+        "python3 tools/data_converters/type_table_data.py --format fx";
+    const TYPE_TABLE_RUST_COMMAND: &str = "cgfx-tools --project cgfx-project.json";
+
+    #[test]
+    fn build_type_table_matches_python_layout() {
+        let table = load_type_table(TYPE_TABLE).expect("type table fixture parses");
+        assert_eq!(table.rows.len(), 8);
+        assert_eq!(table.rows[0].name, "spirit");
+        assert_eq!(table.rows[0].modifiers.len(), 8);
+        assert_eq!(build_type_table(&table), EXPECTED_TYPE_TABLE_BIN);
+    }
+
+    #[test]
+    fn write_type_table_emits_typetable_bin() {
+        let table = load_type_table(TYPE_TABLE).expect("type table fixture parses");
+        let output = format!("{TD}/testdata/builder_out/type_table");
+        write_type_table(&output, &table).expect("type table writes");
+        assert_eq!(
+            std::fs::read(format!("{output}/typetable.bin")).expect("read typetable.bin"),
+            EXPECTED_TYPE_TABLE_BIN,
+        );
+    }
+
+    #[test]
+    fn byte_parity_reports_injected_type_table_divergence() {
+        let table = load_type_table(TYPE_TABLE).expect("type table fixture parses");
+        let mut actual = build_type_table(&table);
+        actual[17] = 0xFF;
+        let error = verify_byte_parity(
+            "typetable.bin",
+            &EXPECTED_TYPE_TABLE_BIN,
+            &actual,
+            TYPE_TABLE_PYTHON_COMMAND,
+            TYPE_TABLE_RUST_COMMAND,
+        )
+        .expect_err("one-byte divergence must fail parity");
+        assert_eq!(
+            error.to_string(),
+            "typetable.bin parity mismatch at byte 17: expected 0x03 from `python3 tools/data_converters/type_table_data.py --format fx`, got 0xFF from `cgfx-tools --project cgfx-project.json`"
+        );
+    }
+
     // ─── creatures.bin: exact bytes from the Go builder (reference contract) ───
     // SquibbleSnail: wind=2, none=8 -> {0,2,8,8,3,3,2,2,3,3,8,32,32,32}
     // NewOne:        none=8, none=8 -> {99,8,8,1,1,1,1,1,1,1,0,0,0,0}
@@ -730,6 +1195,86 @@ mod tests {
             std::fs::read_to_string(format!("{}/moves.hpp", cfg.output_dir)).expect("read hpp");
         assert_eq!(bin, EXPECTED_MOVES_BIN.to_vec());
         assert_eq!(hpp, EXPECTED_MOVES_HPP);
+    }
+
+    // ─── opponents.bin: Python opponent_data.py layout ───
+    const OPPONENTS_CSV: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/opponents.csv");
+
+    #[test]
+    fn build_opponents_matches_known_good_vector() {
+        let opponents = [OpponentSeed {
+            first: OpponentPartyMember {
+                creature_id: 0,
+                level: 31,
+                moves: 0xFFFF_0100,
+            },
+            second: OpponentPartyMember {
+                creature_id: 255,
+                level: 0,
+                moves: 0xFFFF_FF17,
+            },
+            third: OpponentPartyMember {
+                creature_id: 29,
+                level: 255,
+                moves: 0xFFFF_FF1F,
+            },
+        }];
+        assert_eq!(
+            build_opponents(&opponents),
+            vec![
+                0, 31, 0, 1, 0xFF, 0xFF, 0xFF, 0, 23, 0xFF, 0xFF, 0xFF, 29, 0xFF, 31, 0xFF, 0xFF,
+                0xFF,
+            ]
+        );
+    }
+
+    #[test]
+    fn load_opponents_csv_uses_python_name_maps() {
+        let opponents = load_opponents_csv(OPPONENTS_CSV).expect("fixture parses");
+        assert_eq!(opponents.len(), 1);
+        assert_eq!(
+            opponents[0].first,
+            OpponentPartyMember {
+                creature_id: 0,
+                level: 31,
+                moves: 0xFFFF_0100
+            }
+        );
+        assert_eq!(
+            opponents[0].second,
+            OpponentPartyMember {
+                creature_id: 255,
+                level: 0,
+                moves: 0xFFFF_FF17
+            }
+        );
+        assert_eq!(
+            opponents[0].third,
+            OpponentPartyMember {
+                creature_id: 29,
+                level: 255,
+                moves: 0xFFFF_FF1F
+            }
+        );
+    }
+
+    #[test]
+    fn opponent_parity_reports_first_difference_and_commands() {
+        let err = compare_opponent_bytes(
+            &[0xAA, 0xBB],
+            &[0xAA, 0xCC],
+            "python3 opponent_data.py --format fx",
+            "cgfx-tools --opponents-csv data/opponents.csv --opponents-output out",
+        )
+        .expect_err("injected divergence must fail");
+        assert!(err.0.contains("offset 1"), "{err}");
+        assert!(err.0.contains("expected 0xBB"), "{err}");
+        assert!(err.0.contains("actual 0xCC"), "{err}");
+        assert!(
+            err.0.contains("python3 opponent_data.py --format fx"),
+            "{err}"
+        );
+        assert!(err.0.contains("cgfx-tools --opponents-csv"), "{err}");
     }
 
     // ─── map builder: ported mapbuilder_test.go (reference contract) ───

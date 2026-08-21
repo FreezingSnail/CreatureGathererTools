@@ -1,3 +1,4 @@
+pub mod arena;
 pub mod builder;
 pub mod cli;
 pub mod config;
@@ -17,6 +18,76 @@ pub fn run() -> anyhow::Result<()> {
 
     if let Some(project) = args.project {
         return run_project(&project);
+    }
+
+    if let Some(csv) = args.type_table_csv {
+        let output = args.type_table_output.ok_or_else(|| {
+            anyhow::anyhow!("--type-table-output is required with --type-table-csv")
+        })?;
+        let table = builder::load_type_table(&csv)
+            .with_context(|| format!("Loading type table from {}", csv.display()))?;
+        let bytes = builder::build_type_table(&table);
+        builder::write_type_table(&output, &table)
+            .with_context(|| format!("Writing type table to {}", output.display()))?;
+        if args.parity {
+            let rust_command = format!(
+                "cgfx-tools --type-table-csv {} --output {} --parity",
+                csv.display(),
+                output.display()
+            );
+            builder::verify_type_table_python_parity(&csv, &bytes, &rust_command)?;
+        }
+        return Ok(());
+    }
+
+    if let Some(csv) = args.opponents_csv {
+        let output = args.opponents_output.ok_or_else(|| {
+            anyhow::anyhow!("--opponents-output is required with --opponents-csv")
+        })?;
+        let seeds = builder::load_opponents_csv(&csv)
+            .with_context(|| format!("Loading opponents from {}", csv.display()))?;
+        let bytes = builder::build_opponents(&seeds);
+        std::fs::create_dir_all(&output)
+            .with_context(|| format!("Creating {}", output.display()))?;
+        let output_path = output.join("opponents.bin");
+        std::fs::write(&output_path, &bytes)
+            .with_context(|| format!("Writing {}", output_path.display()))?;
+        if args.parity {
+            let rust_command = format!(
+                "cgfx-tools --opponents-csv {} --opponents-output {} --parity",
+                csv.display(),
+                output.display()
+            );
+            builder::verify_opponents_python_parity(&csv, &bytes, &rust_command)?;
+        }
+        return Ok(());
+    }
+
+    if let Some(csv) = args.arena_csv {
+        let output = args
+            .arena_output
+            .ok_or_else(|| anyhow::anyhow!("--arena-output is required with --arena-csv"))?;
+        let entries = arena::parse_arena_csv(&csv)
+            .with_context(|| format!("Loading arena from {}", csv.display()))?;
+        let bytes = arena::build_arena(&entries);
+        std::fs::create_dir_all(&output)
+            .with_context(|| format!("Creating {}", output.display()))?;
+        let output_path = output.join("arena.txt");
+        std::fs::write(&output_path, &bytes)
+            .with_context(|| format!("Writing {}", output_path.display()))?;
+        if args.parity {
+            let root = csv
+                .parent()
+                .and_then(Path::parent)
+                .ok_or_else(|| anyhow::anyhow!("finding project root from {}", csv.display()))?;
+            let rust_command = format!(
+                "cgfx-tools --arena-csv {} --arena-output {} --parity",
+                csv.display(),
+                output.display()
+            );
+            arena::verify_arena_parity(&csv, root.join("tools/arena.py"), &rust_command)?;
+        }
+        return Ok(());
     }
 
     let input = args.input.expect("clap requires input without --project");

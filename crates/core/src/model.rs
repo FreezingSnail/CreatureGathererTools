@@ -152,6 +152,23 @@ pub struct Move {
     pub effect: String,
 }
 
+/// One packed party slot in an opponent seed. `moves` is four move IDs packed
+/// little-endian by slot: move 1 in bits 0..7 through move 4 in bits 24..31.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OpponentPartyMember {
+    pub creature_id: u8,
+    pub level: u8,
+    pub moves: u32,
+}
+
+/// Three-party opponent record consumed by the FX `OpponentSeed` reader.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OpponentSeed {
+    pub first: OpponentPartyMember,
+    pub second: OpponentPartyMember,
+    pub third: OpponentPartyMember,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NPCObject {
     pub id: i32,
