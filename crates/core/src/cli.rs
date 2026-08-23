@@ -16,7 +16,8 @@ pub struct Cli {
             "arena_csv",
             "arena_output",
             "type_table_csv",
-            "type_table_output"
+            "type_table_output",
+            "sprite_config"
         ]
     )]
     pub project: Option<PathBuf>,
@@ -25,7 +26,8 @@ pub struct Cli {
         "project",
         "opponents_csv",
         "arena_csv",
-        "type_table_csv"
+        "type_table_csv",
+        "sprite_config"
     ])]
     pub input: Option<PathBuf>,
     /// Output directory for legacy compilation, arena source, or `typetable.bin`.
@@ -33,7 +35,8 @@ pub struct Cli {
         "project",
         "opponents_csv",
         "arena_csv",
-        "type_table_csv"
+        "type_table_csv",
+        "sprite_config"
     ])]
     pub output: Option<PathBuf>,
     /// Output directory for Rust-built `opponents.bin`.
@@ -54,6 +57,9 @@ pub struct Cli {
     /// Build `typetable.bin` from the canonical `data/typetable.csv` source.
     #[arg(long, value_name = "CSV", conflicts_with_all = ["input", "opponents_csv", "arena_csv"])]
     pub type_table_csv: Option<PathBuf>,
+    /// Emit legacy-compatible sprite C arrays from a native TOML source config.
+    #[arg(long, value_name = "FILE", conflicts_with_all = ["input", "output", "project", "opponents_csv", "arena_csv", "type_table_csv"])]
+    pub sprite_config: Option<PathBuf>,
     /// Run the applicable legacy Python generators and byte-compare outputs.
     #[arg(long)]
     pub parity: bool,
@@ -178,5 +184,14 @@ mod tests {
             Cli::command().render_version().to_string(),
             format!("cgfx-tools {}\n", env!("CARGO_PKG_VERSION"))
         );
+    }
+
+    #[test]
+    fn sprite_config_mode_requires_no_legacy_io_arguments() {
+        let cli = Cli::try_parse_from(["cgfx-tools", "--sprite-config", "fxsprites.toml"])
+            .expect("sprite config invocation parses");
+        assert_eq!(cli.sprite_config, Some(PathBuf::from("fxsprites.toml")));
+        assert!(cli.input.is_none());
+        assert!(cli.output.is_none());
     }
 }

@@ -21,6 +21,100 @@ pub fn encode_png(path: &Path, params: Params) -> anyhow::Result<Sheet> {
         .with_context(|| format!("Encoding sprite from {}", path.display()))
 }
 
+/// Encode a PNG with the legacy Python converter's floor-truncated frame grid.
+///
+/// Legacy sprite filenames describe the frame size, while source PNGs may contain
+/// trailing pixels outside that grid. This path intentionally ignores those pixels.
+pub fn encode_png_legacy(path: &Path, params: Params) -> anyhow::Result<Sheet> {
+    let (pixels, img_w, img_h) = decode_rgba(path)?;
+    encode_rgba_legacy(&pixels, img_w, img_h, params)
+        .with_context(|| format!("Encoding legacy sprite from {}", path.display()))
+}
+
+/// Legacy `convert-sprite.py` compatibility encoder.
+pub fn encode_rgba_legacy(
+    pixels: &[u8],
+    img_w: u32,
+    img_h: u32,
+    params: Params,
+) -> anyhow::Result<Sheet> {
+    let shades = params.shades;
+    if !(2..=4).contains(&shades) {
+        bail!("shades must be 2, 3 or 4, got {shades}");
+    }
+    let image_len = (img_w as usize)
+        .checked_mul(img_h as usize)
+        .and_then(|pixels| pixels.checked_mul(4))
+        .context("image dimensions are too large")?;
+    if pixels.len() != image_len {
+        bail!(
+            "RGBA buffer length {} does not match image dimensions {}x{}",
+            pixels.len(),
+            img_w,
+            img_h
+        );
+    }
+    let sw = if params.width == 0 {
+        u16::try_from(img_w).context("image width exceeds sprite width limit")?
+    } else {
+        params.width
+    };
+    let sh = if params.height == 0 {
+        u16::try_from(img_h).context("image height exceeds sprite height limit")?
+    } else {
+        params.height
+    };
+    let nw = img_w / u32::from(sw);
+    let nh = img_h / u32::from(sh);
+    let num = u16::try_from(nw.checked_mul(nh).context("sprite frame count overflows")?)
+        .context("sprite frame count exceeds u16")?;
+    if num == 0 {
+        bail!("invalid legacy sprite dimensions: image {img_w}x{img_h}, tile {sw}x{sh}");
+    }
+
+    let masked = pixels.chunks_exact(4).any(|px| px[3] < 255);
+    let sp = u32::from(sh).div_ceil(8);
+    let mut out = Vec::with_capacity(
+        usize::from(num)
+            * usize::from(shades - 1)
+            * sp as usize
+            * usize::from(sw)
+            * if masked { 2 } else { 1 },
+    );
+    for n in 0..u32::from(num) {
+        let bx = (n % nw) * u32::from(sw);
+        let by = (n / nw) * u32::from(sh);
+        for shade in 0..(shades - 1) {
+            for page in 0..sp {
+                for ix in 0..u32::from(sw) {
+                    let mut byte = 0;
+                    let mut mask = 0;
+                    for iy in 0..8 {
+                        let y = page * 8 + iy;
+                        if y >= u32::from(sh) {
+                            break;
+                        }
+                        let index = ((by + y) * img_w + bx + ix) as usize * 4;
+                        let rgba = &pixels[index..index + 4];
+                        byte |= shade_of(rgba, shades, shade) << iy;
+                        mask |= mask_of(rgba) << iy;
+                    }
+                    out.push(byte);
+                    if masked {
+                        out.push(mask);
+                    }
+                }
+            }
+        }
+    }
+    Ok(Sheet {
+        bytes: out,
+        frames: num,
+        width: sw,
+        height: sh,
+    })
+}
+
 pub fn encode_rgba(pixels: &[u8], img_w: u32, img_h: u32, params: Params) -> anyhow::Result<Sheet> {
     let shades = params.shades;
     if !(2..=4).contains(&shades) {
@@ -185,4 +279,28 @@ pub(crate) fn decode_rgba(path: &Path) -> anyhow::Result<(Vec<u8>, u32, u32)> {
     };
 
     Ok((rgba, w, h))
+}
+
+#[cfg(test)]
+mod legacy_tests {
+    use super::{Params, encode_rgba_legacy};
+
+    #[test]
+    fn legacy_encoder_ignores_trailing_source_rows() {
+        let pixels = vec![0; 4 * 9 * 4];
+        let sheet = encode_rgba_legacy(
+            &pixels,
+            4,
+            9,
+            Params {
+                width: 4,
+                height: 8,
+                shades: 4,
+                spacing: 0,
+            },
+        )
+        .unwrap();
+        assert_eq!((sheet.frames, sheet.width, sheet.height), (1, 4, 8));
+        assert_eq!(sheet.bytes, vec![0; 24]);
+    }
 }

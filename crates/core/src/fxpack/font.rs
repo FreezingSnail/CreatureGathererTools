@@ -201,8 +201,10 @@ fn render_one(atlas: &Atlas, name: &str, text: &str, shades: u8) -> anyhow::Resu
         image_w,
         padded_h,
         Params {
-            width: 0,
-            height: 0,
+            width: u16::try_from(text_w)
+                .context("string image width exceeds sprite width limit")?,
+            height: u16::try_from(padded_h)
+                .context("string image height exceeds sprite height limit")?,
             shades,
             spacing: 0,
         },

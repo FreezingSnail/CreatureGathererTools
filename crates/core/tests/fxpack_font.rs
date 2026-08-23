@@ -88,20 +88,20 @@ fn renders_joined_greyscale_images_from_indexed_atlas() {
             images[0].sheet.width,
             images[0].sheet.height
         ),
-        (1, 2, 8)
+        (2, 1, 8)
     );
-    assert_eq!(images[0].sheet.bytes, vec![63, 192, 63, 192, 63, 192]);
+    assert_eq!(images[0].sheet.bytes, vec![63, 63, 63, 192, 192, 192]);
     assert_eq!(
         (
             images[1].sheet.frames,
             images[1].sheet.width,
             images[1].sheet.height
         ),
-        (1, 4, 8)
+        (2, 2, 8)
     );
     assert_eq!(
         images[1].sheet.bytes,
-        vec![63, 63, 192, 192, 63, 63, 192, 192, 63, 63, 192, 192]
+        vec![63, 63, 63, 63, 63, 63, 192, 192, 192, 192, 192, 192]
     );
 }
 

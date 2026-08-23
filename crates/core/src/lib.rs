@@ -99,6 +99,10 @@ pub fn run() -> anyhow::Result<()> {
         return Ok(());
     }
 
+    if let Some(config) = args.sprite_config {
+        return fxpack::sprite_source::emit(&config);
+    }
+
     let input = args.input.expect("clap requires input without --project");
     let output = args.output.expect("clap requires output without --project");
 

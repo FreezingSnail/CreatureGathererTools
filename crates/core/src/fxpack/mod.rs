@@ -7,4 +7,5 @@ pub mod pack;
 pub mod parity;
 pub mod spec;
 pub mod sprite;
+pub mod sprite_source;
 pub mod symbol;
