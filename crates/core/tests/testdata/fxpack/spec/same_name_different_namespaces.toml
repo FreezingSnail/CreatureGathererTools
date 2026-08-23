@@ -1,0 +1,18 @@
+[[entry]]
+name = "special"
+namespace = "MenuFXData"
+source = { builder = "menu_special" }
+
+[[entry]]
+name = "special"
+source = { builder = "global_special" }
+
+[[entry]]
+name = "special"
+namespace = "MenuFXData::Nested"
+source = { builder = "nested_special" }
+
+[[entry]]
+name = "special"
+namespace = "OtherFXData::Nested"
+source = { builder = "other_nested_special" }
