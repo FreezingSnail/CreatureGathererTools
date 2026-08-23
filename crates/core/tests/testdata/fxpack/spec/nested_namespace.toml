@@ -11,4 +11,4 @@ source = { builder = "names" }
 [[entry]]
 name = "teamList"
 namespace = "Teams"
-source = { legacy = "Teams::teamList" }
+source = { raw = "generated/typetable.bin" }

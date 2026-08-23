@@ -1,13 +1,13 @@
 use anyhow::{Context, bail};
-use std::path::{Path, PathBuf};
+use std::{collections::BTreeMap, path::{Path, PathBuf}};
 
 use super::{
     carray, header,
     image::{self, Artifacts},
     layout::{Field, FieldKind, Layout},
-    legacy::{self, LegacyBridgeInputs, LegacyOutput},
     spec::{Entry, LayoutSpec, Source},
     sprite::{self, Params},
+    symbol,
 };
 
 pub struct BuilderBytes<'a> {
@@ -22,47 +22,14 @@ pub struct PackOutcome {
     pub fields: Vec<Field>,
 }
 
-/// Pack an FX image without legacy symbolic-reference bridge support.
-///
-/// Existing raw, C-array, image, and builder packing behavior is unchanged.
-/// Layouts with `source = { legacy = "..." }` must call
-/// [`pack_with_legacy`] instead.
+/// Pack an FX image from raw, C-array, typed-symbol, image, and builder sources.
 pub fn pack(
     spec: &LayoutSpec,
     builders: &[BuilderBytes<'_>],
     out_dir: &Path,
     header_path: &Path,
 ) -> anyhow::Result<PackOutcome> {
-    pack_with_legacy(spec, builders, out_dir, header_path, None)
-}
-
-/// Pack an FX image, optionally resolving `legacy` layout entries through the
-/// isolated `fxdata-build.py` bridge.
-pub fn pack_with_legacy(
-    spec: &LayoutSpec,
-    builders: &[BuilderBytes<'_>],
-    out_dir: &Path,
-    header_path: &Path,
-    legacy_inputs: Option<&LegacyBridgeInputs<'_>>,
-) -> anyhow::Result<PackOutcome> {
     validate_builder_keys(spec, builders)?;
-    let symbols: Vec<String> = spec
-        .legacy_symbols()
-        .into_iter()
-        .map(str::to_owned)
-        .collect();
-    let legacy_output = if symbols.is_empty() {
-        None
-    } else {
-        let inputs = legacy_inputs.context(
-            "layout contains legacy sources, but no legacy bridge inputs were supplied; use cgfx-tools --project <project> --pack",
-        )?;
-        Some(
-            legacy::extract(inputs, &symbols)
-                .context("extracting symbolic legacy declarations through fxdata-build.py")?,
-        )
-    };
-
     let mut layout = Layout::new();
     let mut current_namespace: Option<&str> = None;
     for entry in &spec.entries {
@@ -79,7 +46,8 @@ pub fn pack_with_legacy(
         if let Some(align) = entry.align {
             layout.pad(align, false);
         }
-        let (bytes, kind) = resolve_entry(entry, builders, legacy_output.as_ref())
+        let offsets = field_offsets(layout.fields());
+        let (bytes, kind) = resolve_entry(entry, builders, &offsets)
             .with_context(|| format!("resolving entry {:?}", entry.name))?;
         layout.field(&entry.name, kind)?;
         layout.write(&bytes)?;
@@ -113,6 +81,21 @@ pub fn pack_with_legacy(
     })
 }
 
+fn field_offsets(fields: &[Field]) -> BTreeMap<String, u32> {
+    let mut offsets = BTreeMap::new();
+    for field in fields.iter().filter(|field| !field.in_save) {
+        let qualified = field.namespace.as_ref().map_or_else(
+            || field.name.clone(),
+            |namespace| format!("{namespace}::{}", field.name),
+        );
+        offsets.entry(qualified).or_insert(field.addr);
+        // fxdata-build.py resolves an unqualified symbolic initializer to the
+        // first declaration with that name, even if its header name is scoped.
+        offsets.entry(field.name.clone()).or_insert(field.addr);
+    }
+    offsets
+}
+
 fn validate_builder_keys(spec: &LayoutSpec, builders: &[BuilderBytes<'_>]) -> anyhow::Result<()> {
     let spec_keys = spec.builder_keys();
     let available: Vec<&str> = builders.iter().map(|builder| builder.key).collect();
@@ -135,7 +118,7 @@ fn validate_builder_keys(spec: &LayoutSpec, builders: &[BuilderBytes<'_>]) -> an
 fn resolve_entry(
     entry: &Entry,
     builders: &[BuilderBytes<'_>],
-    legacy_output: Option<&LegacyOutput>,
+    offsets: &BTreeMap<String, u32>,
 ) -> anyhow::Result<(Vec<u8>, FieldKind)> {
     match &entry.source {
         Source::Raw(path) => {
@@ -151,6 +134,15 @@ fn resolve_entry(
             };
             Ok((bytes, FieldKind::Bytes))
         }
+        Source::Symbol(spec) => Ok((
+            symbol::extract_symbol_bytes(
+                &spec.path,
+                &spec.symbol,
+                entry.namespace.as_deref(),
+                offsets,
+            )?,
+            FieldKind::Bytes,
+        )),
         Source::Image {
             path,
             width,
@@ -188,10 +180,36 @@ fn resolve_entry(
                 .expect("builder keys validated before entry resolution");
             Ok((builder.bytes.clone(), FieldKind::Bytes))
         }
-        Source::Legacy(symbol) => {
-            let output = legacy_output
-                .context("layout contains a legacy source, but the legacy bridge did not run")?;
-            Ok((output.bytes(symbol)?.to_vec(), FieldKind::Bytes))
-        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::field_offsets;
+    use crate::fxpack::layout::{Field, FieldKind};
+
+    #[test]
+    fn unqualified_offsets_keep_the_first_declaration_alias() {
+        let fields = [
+            Field {
+                name: "attackText".to_owned(),
+                namespace: Some("MenuFXData".to_owned()),
+                addr: 0x08fb,
+                len: 1,
+                kind: FieldKind::Bytes,
+                in_save: false,
+            },
+            Field {
+                name: "attackText".to_owned(),
+                namespace: None,
+                addr: 0x4db4a,
+                len: 1,
+                kind: FieldKind::Bytes,
+                in_save: false,
+            },
+        ];
+        let offsets = field_offsets(&fields);
+        assert_eq!(offsets["attackText"], 0x08fb);
+        assert_eq!(offsets["MenuFXData::attackText"], 0x08fb);
     }
 }

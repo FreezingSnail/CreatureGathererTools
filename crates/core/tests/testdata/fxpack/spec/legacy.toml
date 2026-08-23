@@ -1,3 +1,0 @@
-[[entry]]
-name = "eventTable"
-source = { legacy = "EventData::eventTable" }

@@ -1,0 +1,6 @@
+namespace Data {
+uint8_t count = 1
+uint24_t refs[] = { local, Global::value, 32 };
+uint32_t words[] = { 0x12345678, 0b10 };
+uint24_t nested[] = {{local, Global::value}};
+}

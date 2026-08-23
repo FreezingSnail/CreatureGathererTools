@@ -263,31 +263,8 @@ fn run_project_with_options(
         }
         let dist_dir = project_root.join("dist");
         let header_path = project_root.join("src/fxdata.h");
-        let fxdata_txt = project_root.join("fxdata/fxdata.txt");
-        let python_script = project_root.join("Arduboy-Python-Utilities/fxdata-build.py");
-        let scratch_parent = project_root
-            .canonicalize()
-            .with_context(|| format!("resolving project root {}", project_root.display()))?
-            .parent()
-            .map(Path::to_path_buf)
-            .context("project root has no parent for legacy bridge scratch")?;
-        let scratch_root = scratch_parent.join(".cgfx-legacy-bridge");
-        let python = Path::new("python3");
-        let legacy_inputs =
-            (!spec.legacy_symbols().is_empty()).then_some(fxpack::legacy::LegacyBridgeInputs {
-                fxdata_txt: &fxdata_txt,
-                python_script: &python_script,
-                python,
-                scratch_root: &scratch_root,
-            });
-        let outcome = fxpack::pack::pack_with_legacy(
-            &spec,
-            &builder_list,
-            &dist_dir,
-            &header_path,
-            legacy_inputs.as_ref(),
-        )
-        .with_context(|| "packing FX image")?;
+        let outcome = fxpack::pack::pack(&spec, &builder_list, &dist_dir, &header_path)
+            .with_context(|| "packing FX image")?;
         println!("Packed FX image: {}", outcome.artifacts.dev_bin.display());
     }
 

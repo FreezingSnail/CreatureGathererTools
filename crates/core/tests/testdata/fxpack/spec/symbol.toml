@@ -1,0 +1,4 @@
+[[entry]]
+name = "table"
+namespace = "Data"
+source = { symbol = { path = "../symbol/data.txt", symbol = "refs" } }

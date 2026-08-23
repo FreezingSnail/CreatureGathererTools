@@ -14,6 +14,16 @@ pub enum CArraySpec {
     Filtered { path: PathBuf, symbol: String },
 }
 
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SymbolSpec {
+    /// C-style source file containing a typed (`uint8_t`, `uint24_t`, or
+    /// `uint32_t`) declaration.
+    pub path: PathBuf,
+    /// Declaration name. Its identifiers resolve against earlier layout fields.
+    pub symbol: String,
+}
+
 impl CArraySpec {
     pub fn path(&self) -> &Path {
         match self {
@@ -53,9 +63,9 @@ pub enum Source {
     },
     #[serde(rename = "builder")]
     Builder(String),
-    /// Extract one namespace-qualified declaration from the isolated legacy oracle.
-    #[serde(rename = "legacy")]
-    Legacy(String),
+    /// Encode a typed C declaration and resolve its symbolic offsets natively.
+    #[serde(rename = "symbol")]
+    Symbol(SymbolSpec),
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -112,24 +122,14 @@ impl LayoutSpec {
             .collect()
     }
 
-    /// Namespace-qualified symbols that require the transitional legacy bridge.
-    pub fn legacy_symbols(&self) -> Vec<&str> {
-        self.entries
-            .iter()
-            .filter_map(|entry| match &entry.source {
-                Source::Legacy(symbol) => Some(symbol.as_str()),
-                _ => None,
-            })
-            .collect()
-    }
-
     fn resolve_paths(&mut self, base: &Path) {
         for entry in &mut self.entries {
             match &mut entry.source {
                 Source::Raw(path) => resolve_path(path, base),
                 Source::CArray(spec) => resolve_path(spec.path_mut(), base),
+                Source::Symbol(spec) => resolve_path(&mut spec.path, base),
                 Source::Image { path, .. } => resolve_path(path, base),
-                Source::Builder(_) | Source::Legacy(_) => {}
+                Source::Builder(_) => {}
             }
         }
     }
@@ -161,6 +161,10 @@ impl LayoutSpec {
                 Source::CArray(spec) => {
                     validate_source_path(&entry.name, "carray", spec.path(), base)?
                 }
+                Source::Symbol(spec) => {
+                    validate_source_path(&entry.name, "symbol", &spec.path, base)?;
+                    validate_identifier("symbol", &spec.symbol)?;
+                }
                 Source::Image { path, shades, .. } => {
                     validate_source_path(&entry.name, "image", path, base)?;
                     if !matches!(shades, 2..=4) {
@@ -171,14 +175,6 @@ impl LayoutSpec {
                     }
                 }
                 Source::Builder(_) => {}
-                Source::Legacy(symbol) => {
-                    if symbol.is_empty() || symbol.split("::").any(|part| !is_identifier(part)) {
-                        bail!(
-                            "entry {:?}: legacy symbol {symbol:?} must be a namespace-qualified C++ identifier",
-                            entry.name
-                        );
-                    }
-                }
             }
         }
 

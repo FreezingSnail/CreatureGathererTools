@@ -1,4 +1,4 @@
-use creaturevm::fxpack::spec::{CArraySpec, LayoutSpec, Source};
+use creaturevm::fxpack::spec::{CArraySpec, LayoutSpec, Source, SymbolSpec};
 use std::path::PathBuf;
 
 fn fixture(name: &str) -> PathBuf {
@@ -144,7 +144,7 @@ fn unknown_source_is_rejected_by_deserialization() {
 }
 
 #[test]
-fn nested_namespace_paths_preserve_order_and_legacy_symbols() {
+fn nested_namespace_paths_preserve_order() {
     let spec = LayoutSpec::load(&fixture("nested_namespace.toml")).unwrap();
 
     assert_eq!(
@@ -158,7 +158,6 @@ fn nested_namespace_paths_preserve_order_and_legacy_symbols() {
             Some("Teams"),
         ]
     );
-    assert_eq!(spec.legacy_symbols(), ["Teams::teamList"]);
 }
 
 #[test]
@@ -177,11 +176,13 @@ fn namespace_paths_reject_empty_or_invalid_components() {
 }
 
 #[test]
-fn namespace_qualified_legacy_source_is_exposed() {
-    let spec = LayoutSpec::load(&fixture("legacy.toml")).unwrap();
+fn typed_symbol_source_paths_and_names_resolve() {
+    let path = fixture("symbol.toml");
+    let base = path.parent().unwrap();
+    let spec = LayoutSpec::load(&path).unwrap();
     assert!(matches!(
         &spec.entries[0].source,
-        Source::Legacy(symbol) if symbol == "EventData::eventTable"
+        Source::Symbol(SymbolSpec { path: source, symbol })
+            if source == &base.join("../symbol/data.txt") && symbol == "refs"
     ));
-    assert_eq!(spec.legacy_symbols(), ["EventData::eventTable"]);
 }
