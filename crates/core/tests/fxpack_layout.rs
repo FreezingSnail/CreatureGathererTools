@@ -37,9 +37,12 @@ fn padding_respects_alignment_and_force() {
 #[test]
 fn namespaced_fields_preserve_namespace_and_unterminated_namespace_fails() {
     let mut layout = Layout::new();
-    layout.begin_namespace("sprites");
+    layout.begin_namespace("Teams::StockCreatures");
     layout.field("hero", FieldKind::Bytes).unwrap();
-    assert_eq!(layout.fields()[0].namespace.as_deref(), Some("sprites"));
+    assert_eq!(
+        layout.fields()[0].namespace.as_deref(),
+        Some("Teams::StockCreatures")
+    );
     layout.end_namespace().unwrap();
 
     let mut no_namespace = Layout::new();

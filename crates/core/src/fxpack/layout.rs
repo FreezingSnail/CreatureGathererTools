@@ -20,6 +20,7 @@ pub enum FieldKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Field {
     pub name: String,
+    /// Optional `::`-separated C++ namespace path for the public field name.
     pub namespace: Option<String>,
     pub addr: u32,
     pub len: u32,
@@ -101,6 +102,10 @@ impl Layout {
         }
     }
 
+    /// Begin assigning fields to a `::`-separated C++ namespace path.
+    ///
+    /// Layout specs validate path components before packing; this low-level API
+    /// retains the supplied path so programmatic callers preserve compatibility.
     pub fn begin_namespace(&mut self, name: &str) {
         self.namespace = Some(name.to_owned());
     }

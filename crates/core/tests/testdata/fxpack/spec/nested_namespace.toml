@@ -1,0 +1,14 @@
+[[entry]]
+name = "stockCreatures"
+namespace = "Teams::StockCreatures"
+source = { builder = "stock_creatures" }
+
+[[entry]]
+name = "names"
+namespace = "Teams::Names"
+source = { builder = "names" }
+
+[[entry]]
+name = "teamList"
+namespace = "Teams"
+source = { legacy = "Teams::teamList" }

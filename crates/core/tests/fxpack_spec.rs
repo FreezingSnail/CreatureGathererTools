@@ -123,6 +123,39 @@ fn unknown_source_is_rejected_by_deserialization() {
 }
 
 #[test]
+fn nested_namespace_paths_preserve_order_and_legacy_symbols() {
+    let spec = LayoutSpec::load(&fixture("nested_namespace.toml")).unwrap();
+
+    assert_eq!(
+        spec.entries
+            .iter()
+            .map(|entry| entry.namespace.as_deref())
+            .collect::<Vec<_>>(),
+        [
+            Some("Teams::StockCreatures"),
+            Some("Teams::Names"),
+            Some("Teams"),
+        ]
+    );
+    assert_eq!(spec.legacy_symbols(), ["Teams::teamList"]);
+}
+
+#[test]
+fn namespace_paths_reject_empty_or_invalid_components() {
+    for fixture_name in [
+        "invalid_namespace_empty_component.toml",
+        "invalid_namespace_component.toml",
+    ] {
+        let error = load_error(fixture_name);
+        assert!(error.contains("namespace path"), "{fixture_name}: {error}");
+        assert!(
+            error.contains("components separated by ::"),
+            "{fixture_name}: {error}"
+        );
+    }
+}
+
+#[test]
 fn namespace_qualified_legacy_source_is_exposed() {
     let spec = LayoutSpec::load(&fixture("legacy.toml")).unwrap();
     assert!(matches!(

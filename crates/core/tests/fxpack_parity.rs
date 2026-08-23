@@ -30,6 +30,35 @@ fn verify_pack_parity_succeeds_for_identical_inputs() {
 }
 
 #[test]
+fn parity_normalizes_hex_literal_case_only() {
+    let upper =
+        "constexpr uint16_t FX_DATA_PAGE  = 0xF6B2;\nconstexpr uint24_t first = 0x00ABCD;\n";
+    let lower =
+        "constexpr uint16_t FX_DATA_PAGE  = 0xf6b2;\nconstexpr uint24_t first = 0x00abcd;\n";
+
+    assert_eq!(
+        parity::normalize_header_for_parity(upper),
+        parity::normalize_header_for_parity(lower)
+    );
+}
+
+#[test]
+fn parity_keeps_numeric_values_and_field_order_strict() {
+    let expected = "constexpr uint16_t FX_DATA_PAGE = 0xF6B2;\nconstexpr uint24_t first = 0x000001;\nconstexpr uint24_t second = 0x000002;\n";
+    let changed_value = "constexpr uint16_t FX_DATA_PAGE = 0xF6B2;\nconstexpr uint24_t first = 0x000001;\nconstexpr uint24_t second = 0x000003;\n";
+    let reordered = "constexpr uint16_t FX_DATA_PAGE = 0xF6B2;\nconstexpr uint24_t second = 0x000002;\nconstexpr uint24_t first = 0x000001;\n";
+
+    assert_ne!(
+        parity::normalize_header_for_parity(expected),
+        parity::normalize_header_for_parity(changed_value)
+    );
+    assert_ne!(
+        parity::normalize_header_for_parity(expected),
+        parity::normalize_header_for_parity(reordered)
+    );
+}
+
+#[test]
 #[ignore] // Requires python3 and the FX repo; run with: cargo test -p cgfx-core --test fxpack_parity -- --ignored
 fn live_parity_gate() {
     // This would run the real comparison against ../CreatureGathererFX.

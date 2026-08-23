@@ -142,7 +142,7 @@ impl LayoutSpec {
                 bail!("duplicate entry name {:?}", entry.name);
             }
             if let Some(namespace) = &entry.namespace {
-                validate_identifier("namespace", namespace)
+                validate_namespace_path(namespace)
                     .with_context(|| format!("entry {:?}", entry.name))?;
             }
             if let Some(align) = entry.align
@@ -235,6 +235,15 @@ fn is_identifier(value: &str) -> bool {
     };
     (first.is_ascii_alphabetic() || first == '_')
         && chars.all(|character| character.is_ascii_alphanumeric() || character == '_')
+}
+
+fn validate_namespace_path(path: &str) -> anyhow::Result<()> {
+    if path.split("::").all(is_identifier) {
+        return Ok(());
+    }
+    bail!(
+        "namespace path {path:?} must contain non-empty C++ identifier components separated by ::"
+    );
 }
 
 fn validate_identifier(kind: &str, value: &str) -> anyhow::Result<()> {

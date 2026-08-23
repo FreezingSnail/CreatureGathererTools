@@ -59,7 +59,10 @@ fn packs_raw_and_builder_entries_in_order() {
     );
     assert!(outcome.artifacts.save_bin.is_none());
     assert_eq!(outcome.fields.len(), 2);
-    assert_eq!(outcome.fields[0].namespace.as_deref(), Some("Data"));
+    assert_eq!(
+        outcome.fields[0].namespace.as_deref(),
+        Some("Teams::StockCreatures")
+    );
     assert_eq!(outcome.fields[1].addr, 2);
     assert_eq!(
         std::fs::read_to_string(&outcome.header).unwrap(),
@@ -69,7 +72,7 @@ using uint24_t = __uint24;\n\n\
 // Initialize FX hardware using  FX::begin(FX_DATA_PAGE); in the setup() function.\n\n\
 constexpr uint16_t FX_DATA_PAGE  = 0xFFFF;\n\
 constexpr uint24_t FX_DATA_BYTES = 5;\n\n\
-namespace Data\n{\n  constexpr uint24_t rawData = 0x000000;\n}\n\
+namespace Teams\n{\nnamespace StockCreatures\n{\n    constexpr uint24_t rawData = 0x000000;\n}\n}\n\
 constexpr uint24_t builtData = 0x000002;\n"
     );
 }

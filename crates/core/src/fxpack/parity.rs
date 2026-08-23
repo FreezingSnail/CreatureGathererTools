@@ -1,3 +1,11 @@
+//! Legacy header parity keeps banner-only intent while allowing hexadecimal
+//! digit case to differ between Rust and `fxdata-build.py`.
+//!
+//! After the generated banner and blank lines are removed, every header line
+//! remains an exact comparison except hexadecimal literal spelling is folded
+//! to lowercase. This deliberately preserves constant values, declaration
+//! ordering, field names, and all other formatting as strict parity checks.
+
 use anyhow::{Context, bail};
 use std::path::Path;
 
@@ -34,8 +42,8 @@ pub fn verify_pack_parity(
         );
     }
 
-    let rust_lines = normalize_header(rust_header);
-    let python_lines = normalize_header(&python_header);
+    let rust_lines = normalize_header_for_parity(rust_header);
+    let python_lines = normalize_header_for_parity(&python_header);
     if rust_lines != python_lines {
         for (i, (r, p)) in rust_lines.iter().zip(python_lines.iter()).enumerate() {
             if r != p {
@@ -120,12 +128,56 @@ fn run_python_packer(inputs: &PackParityInputs<'_>) -> anyhow::Result<(Vec<u8>, 
     Ok((python_bin, python_header))
 }
 
-/// Normalize header: drop the generated-by banner and blank lines.
+/// Remove generated banners and blank lines without changing line content.
 pub fn normalize_header(text: &str) -> Vec<&str> {
     text.lines()
         .filter(|line| !line.starts_with("/****") || !line.ends_with("****/"))
         .filter(|line| !line.is_empty())
         .collect()
+}
+
+/// Prepare headers for legacy parity while keeping semantic and ordering checks strict.
+///
+/// Only the spelling case of hexadecimal literals is normalized. Decimal values,
+/// zero padding, names, field order, and all non-hexadecimal text remain exact.
+pub fn normalize_header_for_parity(text: &str) -> Vec<String> {
+    normalize_header(text)
+        .into_iter()
+        .map(normalize_hex_literal_case)
+        .collect()
+}
+
+fn normalize_hex_literal_case(line: &str) -> String {
+    let chars: Vec<char> = line.chars().collect();
+    let mut normalized = String::with_capacity(line.len());
+    let mut index = 0;
+
+    while index < chars.len() {
+        if chars[index] == '0'
+            && chars
+                .get(index + 1)
+                .is_some_and(|character| *character == 'x' || *character == 'X')
+            && chars
+                .get(index + 2)
+                .is_some_and(|character| character.is_ascii_hexdigit())
+        {
+            normalized.push('0');
+            normalized.push('x');
+            index += 2;
+            while let Some(character) = chars.get(index) {
+                if !character.is_ascii_hexdigit() {
+                    break;
+                }
+                normalized.push(character.to_ascii_lowercase());
+                index += 1;
+            }
+        } else {
+            normalized.push(chars[index]);
+            index += 1;
+        }
+    }
+
+    normalized
 }
 
 pub fn first_difference(a: &[u8], b: &[u8]) -> Option<(usize, u8, u8)> {

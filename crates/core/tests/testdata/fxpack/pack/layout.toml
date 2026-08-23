@@ -1,6 +1,6 @@
 [[entry]]
 name = "rawData"
-namespace = "Data"
+namespace = "Teams::StockCreatures"
 source = { raw = "raw.bin" }
 
 [[entry]]

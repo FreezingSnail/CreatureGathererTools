@@ -49,24 +49,15 @@ pub fn render(fields: &[Field], offsets: &Offsets) -> String {
     }
     output.push('\n');
 
-    let mut current_namespace: Option<&str> = None;
+    let mut current_namespace = Vec::new();
     for field in fields.iter().filter(|field| !field.in_save) {
-        if current_namespace != field.namespace.as_deref() {
-            if current_namespace.is_some() {
-                output.push_str("}\n");
-            }
-            if let Some(namespace) = field.namespace.as_deref() {
-                let _ = writeln!(output, "namespace {namespace}");
-                output.push_str("{\n");
-            }
-            current_namespace = field.namespace.as_deref();
-        }
+        let namespace = field
+            .namespace
+            .as_deref()
+            .map_or_else(Vec::new, |path| path.split("::").collect());
+        transition_namespace(&mut output, &mut current_namespace, &namespace);
 
-        let indent = if current_namespace.is_some() {
-            "  "
-        } else {
-            ""
-        };
+        let indent = "  ".repeat(current_namespace.len());
         match &field.kind {
             FieldKind::Bytes => {
                 let _ = writeln!(
@@ -104,9 +95,24 @@ pub fn render(fields: &[Field], offsets: &Offsets) -> String {
         }
     }
 
-    if current_namespace.is_some() {
-        output.push_str("}\n");
-    }
+    transition_namespace(&mut output, &mut current_namespace, &[]);
 
     output
+}
+
+fn transition_namespace<'a>(output: &mut String, current: &mut Vec<&'a str>, next: &[&'a str]) {
+    let common = current
+        .iter()
+        .zip(next)
+        .take_while(|(left, right)| left == right)
+        .count();
+    for _ in common..current.len() {
+        output.push_str("}\n");
+    }
+    current.truncate(common);
+    for component in &next[common..] {
+        let _ = writeln!(output, "namespace {component}");
+        output.push_str("{\n");
+        current.push(component);
+    }
 }

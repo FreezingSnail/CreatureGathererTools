@@ -1,0 +1,4 @@
+[[entry]]
+name = "teamList"
+namespace = "Teams::stock-creatures"
+source = { builder = "teams" }

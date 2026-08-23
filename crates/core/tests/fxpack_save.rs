@@ -1,5 +1,5 @@
 use creaturevm::fxpack::{
-    layout::{Layout, LayoutError, FLASH_PAGES, SAVE_SECTOR},
+    layout::{FLASH_PAGES, Layout, LayoutError, SAVE_SECTOR},
     pack,
     spec::{LayoutSpec, SaveEntry, SaveSpec},
 };

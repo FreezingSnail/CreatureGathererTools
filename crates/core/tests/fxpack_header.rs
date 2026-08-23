@@ -83,6 +83,20 @@ fn opens_and_closes_namespace_blocks() {
 }
 
 #[test]
+fn transitions_nested_namespace_paths_without_reordering_fields() {
+    let fields = [
+        bytes_field("stock", Some("Teams::StockCreatures"), 0),
+        bytes_field("names", Some("Teams::Names"), 1),
+        bytes_field("teamList", Some("Teams"), 2),
+        bytes_field("global", None, 3),
+    ];
+
+    let actual = render(&fields, &offsets(0x1234, 4, None, 0));
+    assert!(actual.contains(
+        "namespace Teams\n{\nnamespace StockCreatures\n{\n    constexpr uint24_t stock = 0x000000;\n}\nnamespace Names\n{\n    constexpr uint24_t names = 0x000001;\n}\n  constexpr uint24_t teamList = 0x000002;\n}\nconstexpr uint24_t global = 0x000003;\n"
+    ));
+}
+#[test]
 fn renders_optional_save_constants() {
     let fields = [bytes_field("save", None, 0)];
     let without_save = render(&fields, &offsets(0xFFFF, 1, None, 0));
