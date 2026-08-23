@@ -1,0 +1,8 @@
+[save]
+sectors = 2
+[[save.entry]]
+name = "save_log"
+offset = 4096
+[[save.entry]]
+name = "save_main"
+offset = 0

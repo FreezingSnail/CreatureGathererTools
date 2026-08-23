@@ -1,0 +1,4 @@
+[[entry]]
+name = "unaligned"
+source = { builder = "builder" }
+align = 3

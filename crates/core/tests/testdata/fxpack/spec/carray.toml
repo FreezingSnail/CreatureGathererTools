@@ -1,0 +1,3 @@
+[[entry]]
+name = "fixture"
+source = { carray = "carray.txt" }

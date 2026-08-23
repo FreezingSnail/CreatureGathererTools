@@ -1,0 +1,3 @@
+[[entry]]
+name = "missing"
+source = { raw = "generated/missing.bin" }

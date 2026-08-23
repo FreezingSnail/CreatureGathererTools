@@ -1,0 +1,8 @@
+[[entry]]
+name = "rawData"
+namespace = "Data"
+source = { raw = "raw.bin" }
+
+[[entry]]
+name = "builtData"
+source = { builder = "built" }

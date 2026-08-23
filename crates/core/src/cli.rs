@@ -60,6 +60,12 @@ pub struct Cli {
     /// Emit model-derived FX device-test fixture headers from the project configuration.
     #[arg(long, requires = "project")]
     pub emit_fixtures: bool,
+    /// Pack the FX image described by fxlayout.toml.
+    #[arg(long, requires = "project")]
+    pub pack: bool,
+    /// Path to the layout spec (defaults to fxlayout.toml beside the project config).
+    #[arg(long, value_name = "FILE", requires = "pack")]
+    pub layout: Option<PathBuf>,
 }
 
 #[cfg(test)]
@@ -130,6 +136,40 @@ mod tests {
         .expect("fixture project invocation parses");
         assert_eq!(cli.project, Some(PathBuf::from("cgfx-project.json")));
         assert!(cli.emit_fixtures);
+    }
+
+    #[test]
+    fn project_mode_accepts_pack_and_layout() {
+        let cli = Cli::try_parse_from([
+            "cgfx-tools",
+            "--project",
+            "cgfx-project.json",
+            "--pack",
+            "--layout",
+            "custom-layout.toml",
+        ])
+        .expect("pack project invocation parses");
+        assert!(cli.pack);
+        assert_eq!(cli.layout, Some(PathBuf::from("custom-layout.toml")));
+    }
+
+    #[test]
+    fn pack_requires_project() {
+        assert!(Cli::try_parse_from(["cgfx-tools", "--pack"]).is_err());
+    }
+
+    #[test]
+    fn layout_requires_pack() {
+        assert!(
+            Cli::try_parse_from([
+                "cgfx-tools",
+                "--project",
+                "cgfx-project.json",
+                "--layout",
+                "custom-layout.toml",
+            ])
+            .is_err()
+        );
     }
 
     #[test]

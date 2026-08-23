@@ -1,0 +1,5 @@
+[save]
+sectors = 2
+[[save.entry]]
+name = "save_main"
+offset = 1

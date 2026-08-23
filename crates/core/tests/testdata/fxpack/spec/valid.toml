@@ -1,0 +1,23 @@
+[[entry]]
+name = "type_table"
+namespace = "MoveData"
+source = { raw = "generated/typetable.bin" }
+align = 256
+
+[[entry]]
+name = "tiles"
+source = { image = { path = "images/tiles.png", width = 16, height = 16, shades = 4, spacing = 0 } }
+
+[[entry]]
+name = "creatureData"
+namespace = "CreatureData"
+source = { builder = "creature_data" }
+
+[save]
+sectors = 2
+[[save.entry]]
+name = "save_main"
+offset = 0
+[[save.entry]]
+name = "save_log"
+offset = 4096

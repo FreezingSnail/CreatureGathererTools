@@ -3,6 +3,7 @@ pub mod builder;
 pub mod cli;
 pub mod config;
 pub mod fixtures;
+pub mod fxpack;
 pub mod manifest;
 pub mod model;
 pub mod parser;
@@ -13,13 +14,19 @@ pub mod tiled;
 pub mod writer;
 use anyhow::Context;
 use clap::Parser;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub fn run() -> anyhow::Result<()> {
     let args = cli::Cli::parse();
 
     if let Some(project) = args.project {
-        return run_project_with_options(&project, args.parity, args.emit_fixtures);
+        return run_project_with_options(
+            &project,
+            args.parity,
+            args.emit_fixtures,
+            args.pack,
+            args.layout,
+        );
     }
 
     if let Some(csv) = args.type_table_csv {
@@ -117,13 +124,15 @@ pub fn run() -> anyhow::Result<()> {
 
 /// Compiles a complete data project described by a config file.
 pub fn run_project(path: impl AsRef<Path>) -> anyhow::Result<()> {
-    run_project_with_options(path, false, false)
+    run_project_with_options(path, false, false, false, None)
 }
 
 fn run_project_with_options(
     path: impl AsRef<Path>,
     parity: bool,
     emit_fixtures: bool,
+    pack: bool,
+    layout: Option<PathBuf>,
 ) -> anyhow::Result<()> {
     let path = path.as_ref();
     let project_root = path.parent().unwrap_or_else(|| Path::new("."));
@@ -223,6 +232,65 @@ fn run_project_with_options(
             creature_source,
         ));
     }
+    if pack {
+        let layout_path = layout.unwrap_or_else(|| project_root.join("fxlayout.toml"));
+        let spec = fxpack::spec::LayoutSpec::load(&layout_path)
+            .with_context(|| format!("loading layout spec {}", layout_path.display()))?;
+        let keys = spec.builder_keys();
+        let mut builder_list = Vec::new();
+        for &key in &keys {
+            let bin_name = match key {
+                "creature_data" => "creatureData.bin",
+                "move_table" => "moves.bin",
+                "opponents" => "opponents.bin",
+                "type_table" => "typetable.bin",
+                "map_data" => "map.bin",
+                "raw_map" => "raw_map.bin",
+                "text" => "text.bin",
+                "scripts" => "scripts.bin",
+                "tool_version" => "tool_version.bin",
+                other => other,
+            };
+            let builder_path = output_dir.join(bin_name);
+            let bytes = std::fs::read(&builder_path).with_context(|| {
+                format!("reading builder {key:?} from {}", builder_path.display())
+            })?;
+            builder_list.push(fxpack::pack::BuilderBytes {
+                key,
+                bytes,
+                namespace: None,
+            });
+        }
+        let dist_dir = project_root.join("dist");
+        let header_path = project_root.join("src/fxdata.h");
+        let fxdata_txt = project_root.join("fxdata/fxdata.txt");
+        let python_script = project_root.join("Arduboy-Python-Utilities/fxdata-build.py");
+        let scratch_parent = project_root
+            .canonicalize()
+            .with_context(|| format!("resolving project root {}", project_root.display()))?
+            .parent()
+            .map(Path::to_path_buf)
+            .context("project root has no parent for legacy bridge scratch")?;
+        let scratch_root = scratch_parent.join(".cgfx-legacy-bridge");
+        let python = Path::new("python3");
+        let legacy_inputs =
+            (!spec.legacy_symbols().is_empty()).then_some(fxpack::legacy::LegacyBridgeInputs {
+                fxdata_txt: &fxdata_txt,
+                python_script: &python_script,
+                python,
+                scratch_root: &scratch_root,
+            });
+        let outcome = fxpack::pack::pack_with_legacy(
+            &spec,
+            &builder_list,
+            &dist_dir,
+            &header_path,
+            legacy_inputs.as_ref(),
+        )
+        .with_context(|| "packing FX image")?;
+        println!("Packed FX image: {}", outcome.artifacts.dev_bin.display());
+    }
+
     manifest::emit(output_dir, &artifact_inputs)
         .with_context(|| format!("Writing manifest in {}", cfg.output_dir))?;
 

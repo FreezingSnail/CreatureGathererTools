@@ -1,0 +1,3 @@
+[[entry]]
+name = "not-valid"
+source = { builder = "builder" }

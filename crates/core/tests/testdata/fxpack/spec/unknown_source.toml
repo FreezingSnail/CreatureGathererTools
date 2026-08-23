@@ -1,0 +1,4 @@
+[[entry]]
+name = "invalid"
+source = { builder = "builder" }
+unexpected = true

@@ -1,0 +1,3 @@
+[[entry]]
+name = "selected"
+source = { carray = { path = "carray.txt", symbol = "selected" } }

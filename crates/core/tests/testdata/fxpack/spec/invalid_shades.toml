@@ -1,0 +1,3 @@
+[[entry]]
+name = "tiles"
+source = { image = { path = "images/tiles.png", width = 16, height = 16, shades = 5 } }

@@ -1,0 +1,7 @@
+[[entry]]
+name = "duplicate"
+source = { builder = "first" }
+
+[[entry]]
+name = "duplicate"
+source = { builder = "second" }
