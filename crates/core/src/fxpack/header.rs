@@ -14,7 +14,7 @@ pub fn render(fields: &[Field], offsets: &Offsets) -> String {
     ));
     let _ = writeln!(
         output,
-        "constexpr uint16_t FX_DATA_PAGE  = 0x{:04X};",
+        "constexpr uint16_t FX_DATA_PAGE  = 0x{:04x};",
         offsets.data_page
     );
     let _ = writeln!(
@@ -91,6 +91,7 @@ pub fn render(fields: &[Field], offsets: &Offsets) -> String {
                     "{indent}constexpr uint8_t  {}Frames = {};",
                     field.name, frames
                 );
+                output.push('\n');
             }
         }
     }
@@ -106,10 +107,14 @@ fn transition_namespace<'a>(output: &mut String, current: &mut Vec<&'a str>, nex
         .zip(next)
         .take_while(|(left, right)| left == right)
         .count();
+    let closed_namespace = common < current.len();
     for _ in common..current.len() {
         output.push_str("}\n");
     }
     current.truncate(common);
+    if closed_namespace {
+        output.push('\n');
+    }
     for component in &next[common..] {
         let _ = writeln!(output, "namespace {component}");
         output.push_str("{\n");

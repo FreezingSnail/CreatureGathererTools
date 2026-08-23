@@ -167,10 +167,10 @@ fn resolve_entry(
                     spacing: *spacing,
                 },
             )?;
-            // fxdata-build.py's image_t prefixes each sheet with u16 width and height.
+            // fxdata-build.py's image_t prefixes each sheet with big-endian u16 width and height.
             let mut bytes = Vec::with_capacity(4 + sheet.bytes.len());
-            bytes.extend_from_slice(&sheet.width.to_le_bytes());
-            bytes.extend_from_slice(&sheet.height.to_le_bytes());
+            bytes.extend_from_slice(&sheet.width.to_be_bytes());
+            bytes.extend_from_slice(&sheet.height.to_be_bytes());
             bytes.extend_from_slice(&sheet.bytes);
             Ok((
                 bytes,
