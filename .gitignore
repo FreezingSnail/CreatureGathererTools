@@ -27,3 +27,5 @@ crates/core/testdata/builder_out/
 *.db
 .beads-credential-key
 .beads/proxieddb/
+# Nested Cargo test/build artifacts
+/crates/core/target/
