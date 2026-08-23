@@ -76,8 +76,29 @@ fn filtered_carray_source_paths_and_symbols_resolve_against_spec_directory() {
 }
 
 #[test]
-fn duplicate_entry_name_is_rejected() {
-    assert!(load_error("duplicate_name.toml").contains("duplicate entry name \"duplicate\""));
+fn duplicate_entry_name_is_rejected_with_qualified_name() {
+    assert!(
+        load_error("duplicate_name.toml")
+            .contains("duplicate entry name \"MenuFXData::duplicate\"")
+    );
+}
+
+#[test]
+fn duplicate_names_in_distinct_namespace_paths_are_accepted_in_order() {
+    let spec = LayoutSpec::load(&fixture("same_name_different_namespaces.toml")).unwrap();
+
+    assert_eq!(
+        spec.entries
+            .iter()
+            .map(|entry| (entry.namespace.as_deref(), entry.name.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            (Some("MenuFXData"), "special"),
+            (None, "special"),
+            (Some("MenuFXData::Nested"), "special"),
+            (Some("OtherFXData::Nested"), "special"),
+        ]
+    );
 }
 
 #[test]

@@ -33,12 +33,24 @@ fn fixture() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/testdata/fxpack/pack/layout.toml")
 }
 
-fn builders() -> [BuilderBytes<'static>; 1] {
-    [BuilderBytes {
-        key: "built",
-        bytes: vec![0x30, 0x40, 0x50],
-        namespace: None,
-    }]
+fn builders() -> [BuilderBytes<'static>; 3] {
+    [
+        BuilderBytes {
+            key: "menu_special",
+            bytes: vec![0x30, 0x40, 0x50],
+            namespace: None,
+        },
+        BuilderBytes {
+            key: "global_special",
+            bytes: vec![0x60],
+            namespace: None,
+        },
+        BuilderBytes {
+            key: "nested_special",
+            bytes: vec![0x70, 0x80],
+            namespace: None,
+        },
+    ]
 }
 
 #[test]
@@ -55,15 +67,23 @@ fn packs_raw_and_builder_entries_in_order() {
 
     assert_eq!(
         std::fs::read(&outcome.artifacts.data_bin).unwrap(),
-        [0x10, 0x20, 0x30, 0x40, 0x50]
+        [0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80]
     );
     assert!(outcome.artifacts.save_bin.is_none());
-    assert_eq!(outcome.fields.len(), 2);
+    assert_eq!(outcome.fields.len(), 4);
     assert_eq!(
-        outcome.fields[0].namespace.as_deref(),
-        Some("Teams::StockCreatures")
+        outcome
+            .fields
+            .iter()
+            .map(|field| (field.namespace.as_deref(), field.name.as_str(), field.addr))
+            .collect::<Vec<_>>(),
+        [
+            (Some("Teams::StockCreatures"), "rawData", 0),
+            (Some("MenuFXData"), "special", 2),
+            (None, "special", 5),
+            (Some("MenuFXData::Nested"), "special", 6),
+        ]
     );
-    assert_eq!(outcome.fields[1].addr, 2);
     assert_eq!(
         std::fs::read_to_string(&outcome.header).unwrap(),
         "#pragma once\n\n\
@@ -71,9 +91,11 @@ fn packs_raw_and_builder_entries_in_order() {
 using uint24_t = __uint24;\n\n\
 // Initialize FX hardware using  FX::begin(FX_DATA_PAGE); in the setup() function.\n\n\
 constexpr uint16_t FX_DATA_PAGE  = 0xFFFF;\n\
-constexpr uint24_t FX_DATA_BYTES = 5;\n\n\
+constexpr uint24_t FX_DATA_BYTES = 8;\n\n\
 namespace Teams\n{\nnamespace StockCreatures\n{\n    constexpr uint24_t rawData = 0x000000;\n}\n}\n\
-constexpr uint24_t builtData = 0x000002;\n"
+namespace MenuFXData\n{\n  constexpr uint24_t special = 0x000002;\n}\n\
+constexpr uint24_t special = 0x000005;\n\
+namespace MenuFXData\n{\nnamespace Nested\n{\n    constexpr uint24_t special = 0x000006;\n}\n}\n"
     );
 }
 
@@ -96,7 +118,7 @@ fn unknown_builder_key_lists_available_keys_before_writing() {
         .err()
         .expect("pack must reject unknown builder")
         .to_string();
-    assert!(error.contains("unknown builder key \"built\""));
+    assert!(error.contains("unknown builder key \"menu_special\""));
     assert!(error.contains("available: [\"other\"]"));
     assert!(!output.path().exists());
 }
@@ -109,7 +131,17 @@ fn unused_builder_key_errors_before_writing() {
         &spec,
         &[
             BuilderBytes {
-                key: "built",
+                key: "menu_special",
+                bytes: vec![],
+                namespace: None,
+            },
+            BuilderBytes {
+                key: "global_special",
+                bytes: vec![],
+                namespace: None,
+            },
+            BuilderBytes {
+                key: "nested_special",
                 bytes: vec![],
                 namespace: None,
             },

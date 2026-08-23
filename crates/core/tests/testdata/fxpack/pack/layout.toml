@@ -4,5 +4,15 @@ namespace = "Teams::StockCreatures"
 source = { raw = "raw.bin" }
 
 [[entry]]
-name = "builtData"
-source = { builder = "built" }
+name = "special"
+namespace = "MenuFXData"
+source = { builder = "menu_special" }
+
+[[entry]]
+name = "special"
+source = { builder = "global_special" }
+
+[[entry]]
+name = "special"
+namespace = "MenuFXData::Nested"
+source = { builder = "nested_special" }

@@ -138,8 +138,11 @@ impl LayoutSpec {
         let mut names = HashSet::new();
         for entry in &self.entries {
             validate_identifier("entry", &entry.name)?;
-            if !names.insert(entry.name.as_str()) {
-                bail!("duplicate entry name {:?}", entry.name);
+            if !names.insert((entry.namespace.as_deref(), entry.name.as_str())) {
+                bail!(
+                    "duplicate entry name {:?}",
+                    entry_symbol(entry.namespace.as_deref(), &entry.name)
+                );
             }
             if let Some(namespace) = &entry.namespace {
                 validate_namespace_path(namespace)
@@ -187,8 +190,8 @@ impl LayoutSpec {
             let mut previous_offset = None;
             for entry in &save.entries {
                 validate_identifier("save entry", &entry.name)?;
-                if !names.insert(entry.name.as_str()) {
-                    bail!("duplicate entry name {:?}", entry.name);
+                if !names.insert((None, entry.name.as_str())) {
+                    bail!("duplicate entry name {:?}", entry_symbol(None, &entry.name));
                 }
                 if entry.offset % SAVE_SECTOR != 0 {
                     bail!(
@@ -220,6 +223,13 @@ impl LayoutSpec {
 
         Ok(())
     }
+}
+
+fn entry_symbol(namespace: Option<&str>, name: &str) -> String {
+    namespace.map_or_else(
+        || name.to_owned(),
+        |namespace| format!("{namespace}::{name}"),
+    )
 }
 
 fn resolve_path(path: &mut PathBuf, base: &Path) {

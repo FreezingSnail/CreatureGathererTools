@@ -1,7 +1,9 @@
 [[entry]]
 name = "duplicate"
+namespace = "MenuFXData"
 source = { builder = "first" }
 
 [[entry]]
 name = "duplicate"
+namespace = "MenuFXData"
 source = { builder = "second" }
