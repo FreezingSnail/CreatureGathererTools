@@ -1,4 +1,4 @@
-use anyhow::{Context, bail};
+use anyhow::{bail, Context};
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
@@ -221,32 +221,85 @@ mod tests {
     use super::field_offsets;
     use crate::fxpack::layout::{Field, FieldKind, FieldSource};
 
+    fn field(name: &str, namespace: Option<&str>, addr: u32) -> Field {
+        Field {
+            name: name.to_owned(),
+            namespace: namespace.map(str::to_owned),
+            addr,
+            source_len: 1,
+            span: 1,
+            kind: FieldKind::Bytes,
+            in_save: false,
+            source: FieldSource::Unknown,
+        }
+    }
+
     #[test]
     fn unqualified_offsets_keep_the_first_declaration_alias() {
         let fields = [
-            Field {
-                name: "attackText".to_owned(),
-                namespace: Some("MenuFXData".to_owned()),
-                addr: 0x08fb,
-                source_len: 1,
-                span: 1,
-                kind: FieldKind::Bytes,
-                in_save: false,
-                source: FieldSource::Unknown,
-            },
-            Field {
-                name: "attackText".to_owned(),
-                namespace: None,
-                addr: 0x4db4a,
-                source_len: 1,
-                span: 1,
-                kind: FieldKind::Bytes,
-                in_save: false,
-                source: FieldSource::Unknown,
-            },
+            field("attackText", Some("MenuFXData"), 0x08fb),
+            field("attackText", None, 0x4db4a),
         ];
         let offsets = field_offsets(&fields);
         assert_eq!(offsets["attackText"], 0x08fb);
         assert_eq!(offsets["MenuFXData::attackText"], 0x08fb);
+    }
+
+    #[test]
+    fn menu_string_collision_aliases_keep_the_first_declaration() {
+        // Immutable project expectation: MenuStrings resolves its bare names
+        // through the first MenuFXData declaration, not the later global one.
+        const COLLISIONS: [(&str, u32, u32); 28] = [
+            ("attackText", 0x0008fb, 0x04db4a),
+            ("enemyAttackText", 0x00090c, 0x04b750),
+            ("damageText", 0x000919, 0x04be58),
+            ("hpText", 0x000926, 0x04b282),
+            ("atkText", 0x00092b, 0x04b8f4),
+            ("defText", 0x000931, 0x04bb4c),
+            ("spdText", 0x000937, 0x04a166),
+            ("satkText", 0x00093d, 0x0498ba),
+            ("sdefText", 0x000944, 0x049662),
+            ("pointerText", 0x00094b, 0x04daf0),
+            ("Fainted", 0x000981, 0x04ad78),
+            ("SwitchIn", 0x000989, 0x04d2da),
+            ("win", 0x00099a, 0x04c0b0),
+            ("lose", 0x0009a2, 0x04a7ba),
+            ("escaped", 0x0009ad, 0x04cbb4),
+            ("changedIn", 0x0009b9, 0x04c524),
+            ("quarter", 0x0009cd, 0x04e55e),
+            ("half", 0x0009df, 0x04b066),
+            ("doubled", 0x0009ec, 0x04d8b6),
+            ("quad", 0x0009fa, 0x04cf92),
+            ("damage", 0x000a0c, 0x048744),
+            ("physical", 0x000a13, 0x04bffc),
+            ("special", 0x000a18, 0x0485dc),
+            ("power", 0x000a1d, 0x04d6d6),
+            ("move", 0x000a24, 0x04dd66),
+            ("change", 0x000a29, 0x04e84c),
+            ("escape", 0x000a30, 0x04e036),
+            ("gather", 0x000a37, 0x04a3fa),
+        ];
+        let fields: Vec<Field> = COLLISIONS
+            .iter()
+            .flat_map(|(name, first, competing)| {
+                [
+                    field(name, Some("MenuFXData"), *first),
+                    field(name, None, *competing),
+                ]
+            })
+            .collect();
+        let offsets = field_offsets(&fields);
+
+        for (name, first, competing) in COLLISIONS {
+            assert_eq!(
+                offsets[name], first,
+                "alias {name}: expected MenuFXData::{name}=0x{first:06X} before competing global {name}=0x{competing:06X}",
+            );
+            assert_eq!(
+                offsets[&format!("MenuFXData::{name}")],
+                first,
+                "qualified MenuFXData::{name} changed from 0x{first:06X}; competing global {name}=0x{competing:06X}",
+            );
+        }
     }
 }
