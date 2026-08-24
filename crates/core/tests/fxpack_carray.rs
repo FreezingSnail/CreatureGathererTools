@@ -1,6 +1,6 @@
 use creaturevm::fxpack::carray::{
-    enumerate_declarations, extract_symbol_bytes, parse_carray_bytes, parse_symbol_bytes, CType,
-    Declaration,
+    CType, Declaration, enumerate_declarations, extract_symbol_bytes, parse_carray_bytes,
+    parse_symbol_bytes,
 };
 use std::path::PathBuf;
 
@@ -69,16 +69,20 @@ fn ignores_numbers_outside_uint8_initializers_and_uint24_declarations() {
 #[test]
 fn rejects_symbolic_values_and_out_of_range_bytes() {
     let symbolic = "uint8_t bytes[] = { other };";
-    assert!(parse_carray_bytes(symbolic)
-        .unwrap_err()
-        .to_string()
-        .contains("unsupported symbolic value"));
+    assert!(
+        parse_carray_bytes(symbolic)
+            .unwrap_err()
+            .to_string()
+            .contains("unsupported symbolic value")
+    );
 
     let out_of_range = "uint8_t bytes[] = { 256 };";
-    assert!(parse_carray_bytes(out_of_range)
-        .unwrap_err()
-        .to_string()
-        .contains("out of byte range"));
+    assert!(
+        parse_carray_bytes(out_of_range)
+            .unwrap_err()
+            .to_string()
+            .contains("out of byte range")
+    );
 }
 
 #[test]

@@ -1,4 +1,4 @@
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use std::path::Path;
 
 /// Integer widths supported by the C-array FX source format.

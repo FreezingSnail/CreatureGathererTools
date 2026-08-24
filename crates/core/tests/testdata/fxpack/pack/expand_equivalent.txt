@@ -1,0 +1,8 @@
+namespace Earlier {
+uint8_t shared[] = { 0x10 };
+} namespace_end
+uint8_t later[] = { 0x20 };
+namespace Tables {
+uint24_t refs[] = { shared, Earlier::shared };
+uint32_t words[] = { 0x12345678 };
+} namespace_end

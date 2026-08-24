@@ -32,7 +32,13 @@ impl Drop for TestDir {
 }
 
 fn fixture() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/testdata/fxpack/pack/layout.toml")
+    pack_fixture("layout.toml")
+}
+
+fn pack_fixture(name: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/testdata/fxpack/pack")
+        .join(name)
 }
 
 fn builders() -> [BuilderBytes<'static>; 3] {
@@ -340,4 +346,53 @@ fn plan_resolves_padded_namespaced_image_and_save_fields_without_artifacts() {
         (4096, 0, 4096, true)
     );
     assert!(!fixture.path().join("artifacts").exists());
+}
+
+#[test]
+fn expanded_source_matches_equivalent_hand_entries() {
+    let expanded = LayoutSpec::load(&pack_fixture("expand_layout.toml")).unwrap();
+    let equivalent = LayoutSpec::load(&pack_fixture("expand_equivalent_layout.toml")).unwrap();
+
+    let expanded_plan = pack::plan(&expanded, &[]).unwrap();
+    let equivalent_plan = pack::plan(&equivalent, &[]).unwrap();
+
+    let expanded_fields = expanded_plan
+        .fields
+        .iter()
+        .map(|field| {
+            (
+                field.namespace.as_deref(),
+                field.name.as_str(),
+                field.addr,
+                field.source_len,
+                field.span,
+                &field.kind,
+                field.in_save,
+                &field.source,
+            )
+        })
+        .collect::<Vec<_>>();
+    let equivalent_fields = equivalent_plan
+        .fields
+        .iter()
+        .map(|field| {
+            (
+                field.namespace.as_deref(),
+                field.name.as_str(),
+                field.addr,
+                field.source_len,
+                field.span,
+                &field.kind,
+                field.in_save,
+                &field.source,
+            )
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(expanded_fields, equivalent_fields);
+    assert_eq!(expanded_plan.bytes, equivalent_plan.bytes);
+    assert_eq!(
+        &expanded_plan.bytes[..11],
+        [0x10, 0, 0, 0, 0, 0, 0, 0x12, 0x34, 0x56, 0x78]
+    );
 }

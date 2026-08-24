@@ -35,25 +35,69 @@ pub struct PackOutcome {
 pub fn plan(spec: &LayoutSpec, builders: &[BuilderBytes<'_>]) -> anyhow::Result<PackPlan> {
     validate_builder_keys(spec, builders)?;
     let mut layout = Layout::new();
-    let mut current_namespace: Option<&str> = None;
+    let mut current_namespace = None;
     for entry in &spec.entries {
-        if matches!(entry.source, Source::Expand { .. }) {
-            bail!("expand sources cannot be packed until expansion is implemented");
+        if let Source::Expand { path, exclude } = &entry.source {
+            let declarations = carray::enumerate_declarations(path)
+                .with_context(|| format!("enumerating expanded source {}", path.display()))?;
+            let excluded = exclude.as_deref().unwrap_or_default();
+            for declaration in declarations
+                .into_iter()
+                .filter(|declaration| !excluded.iter().any(|name| name == &declaration.name))
+            {
+                transition_namespace(
+                    &mut layout,
+                    &mut current_namespace,
+                    declaration.namespace.as_deref(),
+                )?;
+                let offsets = field_offsets(layout.fields());
+                let (bytes, kind, source) = match declaration.ctype {
+                    carray::CType::U8 => (
+                        declaration.bytes.ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "expanded source {} declaration {:?} on line {} has no byte initializer",
+                                path.display(),
+                                declaration.name,
+                                declaration.line,
+                            )
+                        })?,
+                        FieldKind::Bytes,
+                        FieldSource::CArray { path: path.clone() },
+                    ),
+                    carray::CType::U24 | carray::CType::U32 => (
+                        symbol::extract_symbol_bytes(
+                            path,
+                            &declaration.name,
+                            declaration.namespace.as_deref(),
+                            &offsets,
+                        )
+                        .with_context(|| {
+                            format!(
+                                "resolving expanded declaration {:?} at {}:{}",
+                                declaration.name,
+                                path.display(),
+                                declaration.line,
+                            )
+                        })?,
+                        FieldKind::Bytes,
+                        FieldSource::Symbol { path: path.clone() },
+                    ),
+                };
+                layout.field_with_source(&declaration.name, kind, source)?;
+                layout.write(&bytes)?;
+            }
+            continue;
         }
+
         let name = entry
             .name
             .as_deref()
             .expect("validated non-expand entries require names");
-        let entry_namespace = entry.namespace.as_deref();
-        if current_namespace != entry_namespace {
-            if current_namespace.is_some() {
-                layout.end_namespace()?;
-            }
-            if let Some(namespace) = entry_namespace {
-                layout.begin_namespace(namespace);
-            }
-            current_namespace = entry_namespace;
-        }
+        transition_namespace(
+            &mut layout,
+            &mut current_namespace,
+            entry.namespace.as_deref(),
+        )?;
         if let Some(align) = entry.align {
             layout.pad(align, false);
         }
@@ -104,6 +148,23 @@ pub fn pack(
         artifacts,
         fields: plan.fields,
     })
+}
+
+fn transition_namespace(
+    layout: &mut Layout,
+    current_namespace: &mut Option<String>,
+    namespace: Option<&str>,
+) -> anyhow::Result<()> {
+    if current_namespace.as_deref() != namespace {
+        if current_namespace.is_some() {
+            layout.end_namespace()?;
+        }
+        if let Some(namespace) = namespace {
+            layout.begin_namespace(namespace);
+        }
+        *current_namespace = namespace.map(str::to_owned);
+    }
+    Ok(())
 }
 
 fn field_offsets(fields: &[Field]) -> BTreeMap<String, u32> {

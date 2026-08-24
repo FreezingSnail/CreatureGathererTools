@@ -11,7 +11,7 @@ use std::sync::Mutex;
 use creaturevm::builder;
 use creaturevm::config::Config;
 use creaturevm::fxpack::{
-    layout::{Field, FieldKind, FieldSource, FLASH_PAGES, PAGE_SIZE},
+    layout::{FLASH_PAGES, Field, FieldKind, FieldSource, PAGE_SIZE},
     pack::{self, BuilderBytes, PackPlan},
     spec::LayoutSpec,
 };
@@ -430,7 +430,7 @@ fn compile_map(state: State<Mutex<AppState>>) -> CompileResult {
                     msg: "state lock poisoned".into(),
                 }],
                 artifacts: vec![],
-            }
+            };
         }
     };
     compile_map_impl(&st.config)
@@ -450,7 +450,7 @@ fn compile_all(state: State<Mutex<AppState>>) -> CompileResult {
                     msg: "state lock poisoned".into(),
                 }],
                 artifacts: vec![],
-            }
+            };
         }
     };
     let cfg = &st.config;
@@ -896,7 +896,7 @@ mod tests {
 
         let spec = LayoutSpec {
             entries: vec![Entry {
-                name: "map".into(),
+                name: Some("map".into()),
                 namespace: None,
                 source: Source::Builder("map_data".into()),
                 align: None,
