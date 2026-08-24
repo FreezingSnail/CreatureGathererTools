@@ -1,4 +1,4 @@
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
@@ -37,6 +37,13 @@ pub fn plan(spec: &LayoutSpec, builders: &[BuilderBytes<'_>]) -> anyhow::Result<
     let mut layout = Layout::new();
     let mut current_namespace: Option<&str> = None;
     for entry in &spec.entries {
+        if matches!(entry.source, Source::Expand { .. }) {
+            bail!("expand sources cannot be packed until expansion is implemented");
+        }
+        let name = entry
+            .name
+            .as_deref()
+            .expect("validated non-expand entries require names");
         let entry_namespace = entry.namespace.as_deref();
         if current_namespace != entry_namespace {
             if current_namespace.is_some() {
@@ -52,8 +59,8 @@ pub fn plan(spec: &LayoutSpec, builders: &[BuilderBytes<'_>]) -> anyhow::Result<
         }
         let offsets = field_offsets(layout.fields());
         let (bytes, kind) = resolve_entry(entry, builders, &offsets)
-            .with_context(|| format!("resolving entry {:?}", entry.name))?;
-        layout.field_with_source(&entry.name, kind, source_metadata(&entry.source))?;
+            .with_context(|| format!("resolving entry {name:?}"))?;
+        layout.field_with_source(name, kind, source_metadata(&entry.source))?;
         layout.write(&bytes)?;
     }
     if current_namespace.is_some() {
@@ -125,6 +132,7 @@ fn source_metadata(source: &Source) -> FieldSource {
         },
         Source::Image { path, .. } => FieldSource::Image { path: path.clone() },
         Source::Builder(key) => FieldSource::Builder { key: key.clone() },
+        Source::Expand { .. } => unreachable!("expand entries are rejected before packing"),
     }
 }
 
@@ -212,6 +220,9 @@ fn resolve_entry(
                 .find(|builder| builder.key == key)
                 .expect("builder keys validated before entry resolution");
             Ok((builder.bytes.clone(), FieldKind::Bytes))
+        }
+        Source::Expand { .. } => {
+            bail!("expand sources cannot be packed until expansion is implemented")
         }
     }
 }

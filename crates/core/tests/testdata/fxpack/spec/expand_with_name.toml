@@ -1,0 +1,3 @@
+[[entry]]
+name = "forbidden"
+source = { expand = { path = "expand.txt" } }

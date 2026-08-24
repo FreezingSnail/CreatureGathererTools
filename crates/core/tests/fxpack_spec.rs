@@ -18,9 +18,9 @@ fn valid_layout_preserves_entry_order_and_save_block() {
     assert_eq!(
         spec.entries
             .iter()
-            .map(|entry| entry.name.as_str())
+            .map(|entry| entry.name.as_deref())
             .collect::<Vec<_>>(),
-        ["type_table", "tiles", "creatureData"]
+        [Some("type_table"), Some("tiles"), Some("creatureData")]
     );
     assert_eq!(spec.builder_keys(), ["creature_data"]);
     let save = spec.save.as_ref().unwrap();
@@ -90,13 +90,13 @@ fn duplicate_names_in_distinct_namespace_paths_are_accepted_in_order() {
     assert_eq!(
         spec.entries
             .iter()
-            .map(|entry| (entry.namespace.as_deref(), entry.name.as_str()))
+            .map(|entry| (entry.namespace.as_deref(), entry.name.as_deref()))
             .collect::<Vec<_>>(),
         [
-            (Some("MenuFXData"), "special"),
-            (None, "special"),
-            (Some("MenuFXData::Nested"), "special"),
-            (Some("OtherFXData::Nested"), "special"),
+            (Some("MenuFXData"), Some("special")),
+            (None, Some("special")),
+            (Some("MenuFXData::Nested"), Some("special")),
+            (Some("OtherFXData::Nested"), Some("special")),
         ]
     );
 }
@@ -185,4 +185,66 @@ fn typed_symbol_source_paths_and_names_resolve() {
         Source::Symbol(SymbolSpec { path: source, symbol })
             if source == &base.join("../symbol/data.txt") && symbol == "refs"
     ));
+}
+
+#[test]
+fn expand_source_parses_without_an_entry_name() {
+    let path = fixture("expand.toml");
+    let base = path.parent().unwrap();
+    let spec = LayoutSpec::load(&path).unwrap();
+
+    assert_eq!(spec.entries.len(), 1);
+    assert_eq!(spec.entries[0].name, None);
+    assert!(matches!(
+        &spec.entries[0].source,
+        Source::Expand { path: source, exclude: Some(exclude) }
+            if source == &base.join("expand.txt") && exclude == &vec!["second".to_owned()]
+    ));
+}
+
+#[test]
+fn concrete_sources_require_names_but_expand_rejects_name_namespace_and_align() {
+    for (fixture_name, expected) in [
+        ("missing_entry_name.toml", "name is required"),
+        ("expand_with_name.toml", "must not name"),
+        ("expand_with_namespace.toml", "must not set namespace"),
+        ("expand_with_align.toml", "must not set align"),
+    ] {
+        let error = load_error(fixture_name);
+        assert!(error.contains(expected), "{fixture_name}: {error}");
+    }
+}
+
+#[test]
+fn expand_excludes_must_name_declarations() {
+    let error = load_error("expand_unknown_exclude.toml");
+    assert!(
+        error.contains("does not declare excluded name \"unknown\""),
+        "{error}"
+    );
+}
+
+#[test]
+fn expand_requires_declarations_and_closed_namespaces() {
+    let empty_error = load_error("expand_empty.toml");
+    assert!(empty_error.contains("zero declarations"), "{empty_error}");
+
+    let namespace_error = load_error("expand_unterminated.toml");
+    assert!(
+        namespace_error.contains("namespace \"Open\" is not closed"),
+        "{namespace_error}"
+    );
+}
+
+#[test]
+fn expand_declarations_cannot_duplicate_concrete_entry_symbols() {
+    let error = load_error("expand_duplicate.toml");
+    assert!(error.contains("duplicate entry name \"first\""), "{error}");
+}
+
+#[test]
+fn expand_source_preserves_deny_unknown_fields() {
+    let error = load_error("expand_unknown_field.toml");
+    assert!(error.contains("unexpected"), "{error}");
+    assert!(error.contains("unknown"), "{error}");
 }

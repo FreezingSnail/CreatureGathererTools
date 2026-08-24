@@ -1,0 +1,2 @@
+namespace Open {
+uint8_t broken[] = { 1 };

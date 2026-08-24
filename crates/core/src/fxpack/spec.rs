@@ -3,7 +3,7 @@ use serde::Deserialize;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use super::layout::SAVE_SECTOR;
+use super::{carray, layout::SAVE_SECTOR};
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(untagged)]
@@ -66,12 +66,19 @@ pub enum Source {
     /// Encode a typed C declaration and resolve its symbolic offsets natively.
     #[serde(rename = "symbol")]
     Symbol(SymbolSpec),
+    /// Enumerate typed declarations from a C-style source file at pack time.
+    #[serde(rename = "expand")]
+    Expand {
+        path: PathBuf,
+        exclude: Option<Vec<String>>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Entry {
-    pub name: String,
+    /// Required for concrete sources; expand entries derive names from declarations.
+    pub name: Option<String>,
     pub namespace: Option<String>,
     pub source: Source,
     pub align: Option<u32>,
@@ -128,6 +135,7 @@ impl LayoutSpec {
                 Source::Raw(path) => resolve_path(path, base),
                 Source::CArray(spec) => resolve_path(spec.path_mut(), base),
                 Source::Symbol(spec) => resolve_path(&mut spec.path, base),
+                Source::Expand { path, .. } => resolve_path(path, base),
                 Source::Image { path, .. } => resolve_path(path, base),
                 Source::Builder(_) => {}
             }
@@ -135,46 +143,84 @@ impl LayoutSpec {
     }
 
     fn validate(&self, base: &Path) -> anyhow::Result<()> {
-        let mut names = HashSet::new();
+        let mut names: HashSet<(Option<String>, String)> = HashSet::new();
         for entry in &self.entries {
-            validate_identifier("entry", &entry.name)?;
-            if !names.insert((entry.namespace.as_deref(), entry.name.as_str())) {
-                bail!(
-                    "duplicate entry name {:?}",
-                    entry_symbol(entry.namespace.as_deref(), &entry.name)
-                );
-            }
-            if let Some(namespace) = &entry.namespace {
-                validate_namespace_path(namespace)
-                    .with_context(|| format!("entry {:?}", entry.name))?;
-            }
-            if let Some(align) = entry.align
-                && !align.is_power_of_two()
-            {
-                bail!(
-                    "entry {:?}: align {align} must be a non-zero power of two",
-                    entry.name
-                );
-            }
             match &entry.source {
-                Source::Raw(path) => validate_source_path(&entry.name, "raw", path, base)?,
-                Source::CArray(spec) => {
-                    validate_source_path(&entry.name, "carray", spec.path(), base)?
-                }
-                Source::Symbol(spec) => {
-                    validate_source_path(&entry.name, "symbol", &spec.path, base)?;
-                    validate_identifier("symbol", &spec.symbol)?;
-                }
-                Source::Image { path, shades, .. } => {
-                    validate_source_path(&entry.name, "image", path, base)?;
-                    if !matches!(shades, 2..=4) {
+                Source::Expand { path, exclude } => {
+                    if let Some(name) = &entry.name {
+                        bail!("expand entry must not name a declaration: {name:?}");
+                    }
+                    if entry.namespace.is_some() {
+                        bail!("expand entry must not set namespace");
+                    }
+                    if entry.align.is_some() {
+                        bail!("expand entry must not set align");
+                    }
+                    validate_source_path("expand", "expand", path, base)?;
+                    let declarations = carray::enumerate_declarations(path)
+                        .with_context(|| format!("enumerating expand source {}", path.display()))?;
+                    if declarations.is_empty() {
                         bail!(
-                            "entry {:?}: image shades {shades} must be 2, 3, or 4",
-                            entry.name
+                            "expand source {} contains zero declarations",
+                            path.display()
                         );
                     }
+                    let excluded = exclude.as_deref().unwrap_or_default();
+                    for name in excluded {
+                        if !declarations
+                            .iter()
+                            .any(|declaration| declaration.name == *name)
+                        {
+                            bail!(
+                                "expand source {} does not declare excluded name {name:?}",
+                                path.display()
+                            );
+                        }
+                    }
+                    for declaration in declarations.iter().filter(|declaration| {
+                        !excluded.iter().any(|name| name == &declaration.name)
+                    }) {
+                        insert_entry_name(
+                            &mut names,
+                            declaration.namespace.as_deref(),
+                            &declaration.name,
+                        )?;
+                    }
                 }
-                Source::Builder(_) => {}
+                source => {
+                    let name = entry.name.as_deref().ok_or_else(|| {
+                        anyhow::anyhow!("entry name is required unless source is expand")
+                    })?;
+                    validate_identifier("entry", name)?;
+                    insert_entry_name(&mut names, entry.namespace.as_deref(), name)?;
+                    if let Some(namespace) = &entry.namespace {
+                        validate_namespace_path(namespace)
+                            .with_context(|| format!("entry {name:?}"))?;
+                    }
+                    if let Some(align) = entry.align
+                        && !align.is_power_of_two()
+                    {
+                        bail!("entry {name:?}: align {align} must be a non-zero power of two");
+                    }
+                    match source {
+                        Source::Raw(path) => validate_source_path(name, "raw", path, base)?,
+                        Source::CArray(spec) => {
+                            validate_source_path(name, "carray", spec.path(), base)?
+                        }
+                        Source::Symbol(spec) => {
+                            validate_source_path(name, "symbol", &spec.path, base)?;
+                            validate_identifier("symbol", &spec.symbol)?;
+                        }
+                        Source::Image { path, shades, .. } => {
+                            validate_source_path(name, "image", path, base)?;
+                            if !matches!(shades, 2..=4) {
+                                bail!("entry {name:?}: image shades {shades} must be 2, 3, or 4");
+                            }
+                        }
+                        Source::Builder(_) => {}
+                        Source::Expand { .. } => unreachable!("handled above"),
+                    }
+                }
             }
         }
 
@@ -186,9 +232,7 @@ impl LayoutSpec {
             let mut previous_offset = None;
             for entry in &save.entries {
                 validate_identifier("save entry", &entry.name)?;
-                if !names.insert((None, entry.name.as_str())) {
-                    bail!("duplicate entry name {:?}", entry_symbol(None, &entry.name));
-                }
+                insert_entry_name(&mut names, None, &entry.name)?;
                 if entry.offset % SAVE_SECTOR != 0 {
                     bail!(
                         "save entry {:?}: offset {} must be aligned to {SAVE_SECTOR}",
@@ -226,6 +270,17 @@ fn entry_symbol(namespace: Option<&str>, name: &str) -> String {
         || name.to_owned(),
         |namespace| format!("{namespace}::{name}"),
     )
+}
+
+fn insert_entry_name(
+    names: &mut HashSet<(Option<String>, String)>,
+    namespace: Option<&str>,
+    name: &str,
+) -> anyhow::Result<()> {
+    if names.insert((namespace.map(str::to_owned), name.to_owned())) {
+        return Ok(());
+    }
+    bail!("duplicate entry name {:?}", entry_symbol(namespace, name));
 }
 
 fn resolve_path(path: &mut PathBuf, base: &Path) {

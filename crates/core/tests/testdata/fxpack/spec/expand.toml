@@ -1,0 +1,2 @@
+[[entry]]
+source = { expand = { path = "expand.txt", exclude = ["second"] } }

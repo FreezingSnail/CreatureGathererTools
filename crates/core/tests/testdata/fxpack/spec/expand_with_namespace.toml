@@ -1,0 +1,3 @@
+[[entry]]
+namespace = "Forbidden"
+source = { expand = { path = "expand.txt" } }

@@ -173,7 +173,7 @@ fn unresolved_entry_writes_no_outputs() {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/testdata/fxpack/pack/missing.bin");
     let spec = LayoutSpec {
         entries: vec![Entry {
-            name: "missing".to_owned(),
+            name: Some("missing".to_owned()),
             namespace: None,
             source: Source::Raw(missing),
             align: None,
@@ -248,13 +248,13 @@ fn plan_resolves_padded_namespaced_image_and_save_fields_without_artifacts() {
     let spec = LayoutSpec {
         entries: vec![
             Entry {
-                name: "raw".to_owned(),
+                name: Some("raw".to_owned()),
                 namespace: Some("Data".to_owned()),
                 source: Source::Raw(raw_path.clone()),
                 align: None,
             },
             Entry {
-                name: "tile".to_owned(),
+                name: Some("tile".to_owned()),
                 namespace: None,
                 source: Source::Image {
                     path: image_path.clone(),

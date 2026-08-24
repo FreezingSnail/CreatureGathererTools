@@ -1,0 +1,7 @@
+namespace Outer {
+uint8_t bytes[] = { 1, 2 };
+namespace Inner {
+uint24_t refs[] = { bytes };
+} namespace_end
+} namespace_end
+uint32_t words[] = { 0x12345678 };

@@ -1,0 +1,3 @@
+[[entry]]
+align = 4
+source = { expand = { path = "expand.txt" } }

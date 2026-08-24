@@ -1,0 +1,2 @@
+[[entry]]
+source = { expand = { path = "expand_empty.txt" } }

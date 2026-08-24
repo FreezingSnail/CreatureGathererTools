@@ -1,0 +1,4 @@
+uint8_t first[] = { 1 };
+namespace Expanded {
+uint8_t second[] = { 2 };
+} namespace_end

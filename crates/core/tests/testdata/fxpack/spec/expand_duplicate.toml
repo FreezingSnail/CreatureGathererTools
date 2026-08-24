@@ -1,0 +1,6 @@
+[[entry]]
+name = "first"
+source = { raw = "generated/typetable.bin" }
+
+[[entry]]
+source = { expand = { path = "expand.txt", exclude = ["second"] } }
