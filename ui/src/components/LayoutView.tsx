@@ -234,7 +234,10 @@ export function LayoutView() {
   useEffect(() => { void refresh(); }, []);
 
   if (loading) return <div data-testid="layout-loading" className="p-4 text-sm text-muted-foreground">Loading layout…</div>;
-  if (error) return <div className="p-4"><Alert variant="destructive" data-testid="layout-error"><AlertTitle>Layout unavailable</AlertTitle><AlertDescription>{error}<br />Run <strong>Compile all</strong> to generate the required builder bins, then refresh.</AlertDescription></Alert><Button size="sm" variant="outline" className="mt-2" onClick={() => void refresh()}>Refresh</Button></div>;
+  if (error) {
+    const missingBuilderBins = error.includes("missing builder");
+    return <div className="p-4"><Alert variant="destructive" data-testid="layout-error"><AlertTitle>Layout unavailable</AlertTitle><AlertDescription>{error}{missingBuilderBins && <><br />Run <strong>Compile all</strong> to generate the required builder bins, then refresh.</>}</AlertDescription></Alert><Button size="sm" variant="outline" className="mt-2" onClick={() => void refresh()}>Refresh</Button></div>;
+  }
   if (!report || report.fields.length === 0) return <div className="p-4"><Alert data-testid="layout-empty"><AlertTitle>No layout fields</AlertTitle><AlertDescription>Compile project content, then refresh the layout report.</AlertDescription></Alert><Button size="sm" variant="outline" className="mt-2" onClick={() => void refresh()}>Refresh</Button></div>;
 
   const sections = splitLayoutSections(report);

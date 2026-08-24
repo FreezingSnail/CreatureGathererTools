@@ -9,6 +9,7 @@ export interface Config {
   map_tileset_png: string;
   npc_tileset_png: string;
   output_dir: string;
+  fx_layout?: string;
 }
 
 export interface NPCObject {

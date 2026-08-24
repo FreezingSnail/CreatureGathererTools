@@ -21,6 +21,8 @@ pub struct Config {
     pub output_dir: String,
     #[serde(default, rename = "fixture_dir")]
     pub fixture_dir: Option<String>,
+    #[serde(default, rename = "fx_layout", skip_serializing_if = "Option::is_none")]
+    pub fx_layout: Option<String>,
 }
 
 impl Config {
@@ -52,6 +54,9 @@ impl Config {
         resolve_relative_path(&mut self.output_dir, config_dir);
         if let Some(fixture_dir) = &mut self.fixture_dir {
             resolve_relative_path(fixture_dir, config_dir);
+        }
+        if let Some(fx_layout) = &mut self.fx_layout {
+            resolve_relative_path(fx_layout, config_dir);
         }
     }
 }
@@ -99,6 +104,7 @@ mod tests {
             cfg.fixture_dir,
             Some(base.join("fixtures").to_string_lossy().into_owned())
         );
+        assert_eq!(cfg.fx_layout, None);
     }
 
     #[test]

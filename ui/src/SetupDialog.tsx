@@ -22,6 +22,7 @@ export interface SetupFields {
   map_tileset_png: string;
   npc_tileset_png: string;
   output_dir: string;
+  fx_layout: string;
 }
 
 const FIELDS: { key: keyof SetupFields; label: string }[] = [
@@ -31,6 +32,7 @@ const FIELDS: { key: keyof SetupFields; label: string }[] = [
   { key: "map_tileset_png", label: "Map Tileset PNG" },
   { key: "npc_tileset_png", label: "NPC Tileset PNG" },
   { key: "output_dir", label: "Output Dir" },
+  { key: "fx_layout", label: "FX Layout (optional)" },
 ];
 
 const emptyValues = (): SetupFields => ({
@@ -40,6 +42,7 @@ const emptyValues = (): SetupFields => ({
   map_tileset_png: "",
   npc_tileset_png: "",
   output_dir: "",
+  fx_layout: "",
 });
 
 interface SetupDialogProps {
@@ -59,6 +62,7 @@ export function SetupDialog({ initial, error, onSubmit }: SetupDialogProps) {
       map_tileset_png: initial.map_tileset_png,
       npc_tileset_png: initial.npc_tileset_png,
       output_dir: initial.output_dir,
+      fx_layout: initial.fx_layout ?? "",
     };
   });
 
@@ -77,6 +81,7 @@ export function SetupDialog({ initial, error, onSubmit }: SetupDialogProps) {
       map_tileset_png: values.map_tileset_png,
       npc_tileset_png: values.npc_tileset_png,
       output_dir: values.output_dir,
+      fx_layout: values.fx_layout || undefined,
     });
   };
 

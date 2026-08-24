@@ -66,6 +66,14 @@ describe("LayoutView", () => {
     expect(await screen.findByTestId("layout-view")).toBeInTheDocument();
   });
 
+  it("shows layout-spec remedies without Compile all guidance", async () => {
+    mockInvoke.mockRejectedValueOnce(new Error("layout spec unavailable; set fx_layout in creature-tools.json"));
+    render(<LayoutView />);
+    const error = await screen.findByTestId("layout-error");
+    expect(error).toHaveTextContent("set fx_layout");
+    expect(error).not.toHaveTextContent("Compile all");
+  });
+
   it("shows an empty report", async () => {
     mockInvoke.mockResolvedValue({ ...report, fields: [] });
     render(<LayoutView />);

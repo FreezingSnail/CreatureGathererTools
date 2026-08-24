@@ -211,10 +211,42 @@ fn layout_report_from_plan(
     }
 }
 
-fn layout_report_impl(cfg: &Config, project_root: &Path) -> Result<LayoutReport, String> {
-    let layout_path = project_root.join("fxlayout.toml");
-    let spec = LayoutSpec::load(&layout_path)
-        .map_err(|e| format!("loading layout spec {}: {e}", layout_path.display()))?;
+const LAYOUT_SPEC_REMEDY: &str =
+    "set fx_layout in creature-tools.json or check the FX checkout path";
+
+fn layout_spec_path(cfg: &Config) -> Result<PathBuf, String> {
+    if let Some(path) = &cfg.fx_layout {
+        let path = PathBuf::from(path);
+        if path.is_file() {
+            return Ok(path);
+        }
+        return Err(format!(
+            "layout spec unavailable at {}; {LAYOUT_SPEC_REMEDY}",
+            path.display()
+        ));
+    }
+
+    let output_dir = Path::new(&cfg.output_dir);
+    for project_root in output_dir.ancestors() {
+        let layout_path = project_root.join("fxlayout.toml");
+        if layout_path.is_file() {
+            return Ok(layout_path);
+        }
+    }
+    Err(format!(
+        "layout spec unavailable: no fxlayout.toml found walking up from {}; {LAYOUT_SPEC_REMEDY}",
+        output_dir.display()
+    ))
+}
+
+fn layout_report_impl(cfg: &Config) -> Result<LayoutReport, String> {
+    let layout_path = layout_spec_path(cfg)?;
+    let spec = LayoutSpec::load(&layout_path).map_err(|e| {
+        format!(
+            "loading layout spec {}: {e}; {LAYOUT_SPEC_REMEDY}",
+            layout_path.display()
+        )
+    })?;
     let (builders, builder_paths) = load_layout_builders(&spec, Path::new(&cfg.output_dir))?;
     let plan = pack::plan(&spec, &builders).map_err(err_str)?;
     Ok(layout_report_from_plan(plan, &builder_paths))
@@ -223,8 +255,7 @@ fn layout_report_impl(cfg: &Config, project_root: &Path) -> Result<LayoutReport,
 #[tauri::command]
 fn layout_report(state: State<Mutex<AppState>>) -> Result<LayoutReport, String> {
     let st = state.lock().map_err(err_str)?;
-    let project_root = std::env::current_dir().map_err(err_str)?;
-    layout_report_impl(&st.config, &project_root)
+    layout_report_impl(&st.config)
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -565,6 +596,7 @@ fn default_config() -> Config {
         npc_tileset_png: String::new(),
         output_dir: String::new(),
         fixture_dir: None,
+        fx_layout: None,
     }
 }
 
@@ -727,6 +759,7 @@ mod tests {
             npc_tileset_png: String::new(),
             output_dir: "out".into(),
             fixture_dir: None,
+            fx_layout: None,
         };
         let paths = artifact_paths(&cfg, &MAP_ARTIFACTS);
         assert_eq!(paths.len(), 9);
@@ -745,6 +778,7 @@ mod tests {
             npc_tileset_png: String::new(),
             output_dir: "out".into(),
             fixture_dir: None,
+            fx_layout: None,
         };
         let r = compile_map_impl(&cfg);
         assert!(!r.ok);
@@ -810,6 +844,52 @@ mod tests {
         assert_eq!(value["fields"][0]["image"]["frames"], 2);
     }
 
+    fn layout_test_config(output_dir: PathBuf, fx_layout: Option<PathBuf>) -> Config {
+        Config {
+            creatures_json: String::new(),
+            moves_json: String::new(),
+            map_json: String::new(),
+            tileset_png: String::new(),
+            map_tileset_png: String::new(),
+            npc_tileset_png: String::new(),
+            output_dir: output_dir.to_string_lossy().into_owned(),
+            fixture_dir: None,
+            fx_layout: fx_layout.map(|path| path.to_string_lossy().into_owned()),
+        }
+    }
+
+    #[test]
+    fn layout_spec_path_uses_explicit_fx_layout() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../crates/core/testdata/layout_resolution");
+        let expected = root.join("fxlayout.toml");
+        let cfg = layout_test_config(PathBuf::from("unused-output-dir"), Some(expected.clone()));
+        assert_eq!(
+            layout_spec_path(&cfg).expect("explicit layout path"),
+            expected
+        );
+    }
+
+    #[test]
+    fn layout_spec_path_walks_up_from_output_dir() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../crates/core/testdata/layout_resolution");
+        let expected = root.join("fxlayout.toml");
+        let cfg = layout_test_config(root.join("fxdata/generated"), None);
+        assert_eq!(
+            layout_spec_path(&cfg).expect("derived layout path"),
+            expected
+        );
+    }
+
+    #[test]
+    fn layout_report_missing_spec_has_layout_remedy_not_compile_all() {
+        let cfg = layout_test_config(PathBuf::from("/nonexistent/layout-report-output"), None);
+        let error = layout_report_impl(&cfg).expect_err("layout spec must be missing");
+        assert!(error.contains(LAYOUT_SPEC_REMEDY));
+        assert!(!error.contains("Compile all"));
+    }
+
     #[test]
     fn layout_report_missing_builder_names_path_and_compile_all() {
         use creaturevm::fxpack::spec::{Entry, LayoutSpec, Source};
@@ -831,6 +911,7 @@ mod tests {
         assert!(error.contains("missing builder \"map_data\""));
         assert!(error.contains("/nonexistent/layout-report-output/map.bin"));
         assert!(error.contains("run Compile all"));
+        assert!(!error.contains(LAYOUT_SPEC_REMEDY));
     }
 
     #[test]

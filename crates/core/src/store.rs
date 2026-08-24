@@ -78,6 +78,7 @@ mod tests {
             npc_tileset_png: String::new(),
             output_dir: String::new(),
             fixture_dir: None,
+            fx_layout: None,
         }
     }
 
@@ -213,6 +214,7 @@ mod tests {
             npc_tileset_png: String::new(),
             output_dir: String::new(),
             fixture_dir: None,
+            fx_layout: None,
         };
         let s = Store::new(&c);
         assert!(s.load_creatures().is_err(), "expected error");
@@ -239,6 +241,7 @@ mod tests {
             npc_tileset_png: String::new(),
             output_dir: String::new(),
             fixture_dir: None,
+            fx_layout: None,
         };
         let s = Store::new(&c);
         let m = s.load_map().expect("partial map must load like Go");
@@ -261,6 +264,7 @@ mod tests {
             npc_tileset_png: String::new(),
             output_dir: String::new(),
             fixture_dir: None,
+            fx_layout: None,
         };
         let s = Store::new(&c);
         assert!(s.load_map().is_err(), "expected error");

@@ -1127,6 +1127,7 @@ mod tests {
             npc_tileset_png: String::new(),
             output_dir: format!("{TD}/testdata/builder_out/{output_dir}"),
             fixture_dir: None,
+            fx_layout: None,
         }
     }
 
