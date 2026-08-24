@@ -11,7 +11,7 @@ use std::sync::Mutex;
 use creaturevm::builder;
 use creaturevm::config::Config;
 use creaturevm::fxpack::{
-    layout::{FLASH_PAGES, Field, FieldKind, FieldSource, PAGE_SIZE},
+    layout::{Field, FieldKind, FieldSource, FLASH_PAGES, PAGE_SIZE},
     pack::{self, BuilderBytes, PackPlan},
     spec::LayoutSpec,
 };

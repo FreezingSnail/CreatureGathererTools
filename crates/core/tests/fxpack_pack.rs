@@ -391,8 +391,30 @@ fn expanded_source_matches_equivalent_hand_entries() {
 
     assert_eq!(expanded_fields, equivalent_fields);
     assert_eq!(expanded_plan.bytes, equivalent_plan.bytes);
+    assert!(matches!(
+        expanded_plan.fields[0].source,
+        FieldSource::CArray { .. }
+    ));
+    assert!(matches!(
+        expanded_plan.fields[1].source,
+        FieldSource::Symbol { .. }
+    ));
     assert_eq!(
-        &expanded_plan.bytes[..11],
-        [0x10, 0, 0, 0, 0, 0, 0, 0x12, 0x34, 0x56, 0x78]
+        &expanded_plan.bytes[..12],
+        [0x10, 0x21, 0, 0, 0, 0, 0, 0, 0x12, 0x34, 0x56, 0x78]
     );
+}
+
+#[test]
+fn real_old_and_expand_layouts_remain_strictly_equivalent() {
+    let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../CreatureGathererFX/tools/tests/fixtures");
+    let old = LayoutSpec::load(&fixtures.join("fxlayout-old-304.toml")).unwrap();
+    let expanded = LayoutSpec::load(&fixtures.join("fxlayout-expand-20.toml")).unwrap();
+
+    creaturevm::fxpack::equivalence::assert_equivalent(
+        &pack::plan(&old, &[]).unwrap(),
+        &pack::plan(&expanded, &[]).unwrap(),
+    )
+    .unwrap();
 }

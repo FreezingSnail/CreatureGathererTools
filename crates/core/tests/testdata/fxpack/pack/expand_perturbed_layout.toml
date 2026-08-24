@@ -1,0 +1,18 @@
+[[entry]]
+name = "shared"
+namespace = "Earlier"
+source = { carray = { path = "expand_equivalent.txt", symbol = "shared" } }
+
+[[entry]]
+name = "scalar"
+source = { symbol = { path = "expand_equivalent.txt", symbol = "scalar" } }
+
+[[entry]]
+name = "changed"
+namespace = "Tables"
+source = { symbol = { path = "expand_equivalent.txt", symbol = "refs" } }
+
+[[entry]]
+name = "words"
+namespace = "Tables"
+source = { symbol = { path = "expand_equivalent.txt", symbol = "words" } }

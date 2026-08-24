@@ -25,7 +25,34 @@ pub struct Declaration {
 ///
 /// `uint8_t` initializers are decoded, while `uint24_t` and `uint32_t`
 /// declarations retain their source metadata for typed-symbol packing.
+/// This public view intentionally omits pack-only source provenance.
 pub fn enumerate_declarations(path: &Path) -> anyhow::Result<Vec<Declaration>> {
+    Ok(enumerate_expanded_declarations(path)?
+        .into_iter()
+        .map(|declaration| declaration.declaration)
+        .collect())
+}
+
+/// Pack-only declaration metadata preserving the legacy source form.
+///
+/// Numeric scalar `uint8_t` declarations historically used the typed-symbol
+/// path, while braced and string `uint8_t` initializers used C-array packing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DeclarationSource {
+    CArray,
+    Symbol,
+}
+
+/// A parsed declaration with source provenance used only while expanding a layout.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ExpandedDeclaration {
+    pub declaration: Declaration,
+    pub source: DeclarationSource,
+}
+
+pub(crate) fn enumerate_expanded_declarations(
+    path: &Path,
+) -> anyhow::Result<Vec<ExpandedDeclaration>> {
     let content =
         std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     parse_declarations(&content, &path.display().to_string())
@@ -61,7 +88,7 @@ pub fn extract_symbol_bytes(path: &Path, symbol: &str) -> anyhow::Result<Vec<u8>
 pub fn parse_carray_bytes(content: &str) -> anyhow::Result<Vec<u8>> {
     Ok(parse_declarations(content, "<input>")?
         .into_iter()
-        .flat_map(|declaration| declaration.bytes)
+        .flat_map(|declaration| declaration.declaration.bytes)
         .flatten()
         .collect())
 }
@@ -70,6 +97,7 @@ pub fn parse_carray_bytes(content: &str) -> anyhow::Result<Vec<u8>> {
 pub fn parse_symbol_bytes(content: &str, symbol: &str) -> anyhow::Result<Vec<u8>> {
     parse_declarations(content, "<input>")?
         .into_iter()
+        .map(|declaration| declaration.declaration)
         .filter(|declaration| declaration.name == symbol)
         .take(1)
         .flat_map(|declaration| declaration.bytes)
@@ -77,7 +105,7 @@ pub fn parse_symbol_bytes(content: &str, symbol: &str) -> anyhow::Result<Vec<u8>
         .ok_or_else(|| anyhow::anyhow!("symbol {symbol:?} not found"))
 }
 
-fn parse_declarations(content: &str, source: &str) -> anyhow::Result<Vec<Declaration>> {
+fn parse_declarations(content: &str, source: &str) -> anyhow::Result<Vec<ExpandedDeclaration>> {
     let mut parser = Parser {
         input: content.as_bytes(),
         position: 0,
@@ -99,7 +127,7 @@ struct Parser<'input, 'source> {
     input: &'input [u8],
     position: usize,
     source: &'source str,
-    declarations: Vec<Declaration>,
+    declarations: Vec<ExpandedDeclaration>,
     namespaces: Vec<Namespace>,
     unstructured_braces: u32,
 }
@@ -124,8 +152,8 @@ impl Parser<'_, '_> {
                 b'}' => self.end_namespace()?,
                 byte if is_identifier_start(byte) => {
                     let line = self.line();
-                    let identifier = self.read_identifier();
-                    match identifier {
+                    let identifier = self.read_identifier().to_vec();
+                    match identifier.as_slice() {
                         b"namespace" => self.parse_namespace(line)?,
                         b"uint8_t" => self.parse_declaration(CType::U8, line)?,
                         b"uint24_t" => self.parse_declaration(CType::U24, line)?,
@@ -143,7 +171,10 @@ impl Parser<'_, '_> {
                             self.source,
                             line
                         ),
-                        _ => {}
+                        identifier => self.parse_legacy_declaration(
+                            String::from_utf8_lossy(identifier).into_owned(),
+                            line,
+                        )?,
                     }
                 }
                 _ => self.position += 1,
@@ -231,14 +262,20 @@ impl Parser<'_, '_> {
                 Some(b'=') => {
                     self.position += 1;
                     self.skip_whitespace_and_comments()?;
-                    let bytes = match ctype {
-                        CType::U8 => Some(match self.current_opt() {
-                            Some(b'{') => self.parse_braced_initializer()?,
-                            Some(b'"') => self.parse_string_initializer()?,
+                    let (bytes, source) = match ctype {
+                        CType::U8 => match self.current_opt() {
+                            Some(b'{') => (
+                                Some(self.parse_braced_initializer()?),
+                                DeclarationSource::CArray,
+                            ),
+                            Some(b'"') => (
+                                Some(self.parse_string_initializer()?),
+                                DeclarationSource::CArray,
+                            ),
                             Some(b'0'..=b'9') => {
                                 let mut bytes = Vec::new();
                                 self.parse_number(&mut bytes)?;
-                                bytes
+                                (Some(bytes), DeclarationSource::Symbol)
                             }
                             Some(_) => bail!(
                                 "{}:{}: uint8_t initializer must start with '{{' or a string literal",
@@ -246,18 +283,21 @@ impl Parser<'_, '_> {
                                 line
                             ),
                             None => bail!("{}:{}: unterminated declaration", self.source, line),
-                        }),
+                        },
                         CType::U24 | CType::U32 => {
                             self.skip_typed_initializer(line)?;
-                            None
+                            (None, DeclarationSource::Symbol)
                         }
                     };
-                    self.declarations.push(Declaration {
-                        name,
-                        namespace: self.namespace(),
-                        ctype,
-                        bytes,
-                        line,
+                    self.declarations.push(ExpandedDeclaration {
+                        declaration: Declaration {
+                            name,
+                            namespace: self.namespace(),
+                            ctype,
+                            bytes,
+                            line,
+                        },
+                        source,
                     });
                     return Ok(());
                 }
@@ -270,6 +310,27 @@ impl Parser<'_, '_> {
                 None => bail!("{}:{}: unterminated declaration", self.source, line),
             }
         }
+    }
+
+    fn parse_legacy_declaration(&mut self, name: String, line: u32) -> anyhow::Result<()> {
+        self.skip_whitespace_and_comments()?;
+        if self.current_opt() != Some(b'=') {
+            return Ok(());
+        }
+        self.position += 1;
+        self.skip_whitespace_and_comments()?;
+        self.skip_typed_initializer(line)?;
+        self.declarations.push(ExpandedDeclaration {
+            declaration: Declaration {
+                name,
+                namespace: self.namespace(),
+                ctype: CType::U24,
+                bytes: None,
+                line,
+            },
+            source: DeclarationSource::Symbol,
+        });
+        Ok(())
     }
 
     fn skip_typed_initializer(&mut self, line: u32) -> anyhow::Result<()> {

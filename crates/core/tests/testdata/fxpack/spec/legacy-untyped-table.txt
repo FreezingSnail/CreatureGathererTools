@@ -1,0 +1,3 @@
+namespace EventData {
+    table = { first, second };
+} namespace_end

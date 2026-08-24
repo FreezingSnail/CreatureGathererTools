@@ -19,6 +19,12 @@ use std::path::{Path, PathBuf};
 pub fn run() -> anyhow::Result<()> {
     let args = cli::Cli::parse();
 
+    if let Some(layouts) = args.assert_layout_equivalent {
+        fxpack::equivalence::assert_layout_files_equivalent(&layouts[0], &layouts[1])?;
+        println!("layout equivalence: PASS");
+        return Ok(());
+    }
+
     if let Some(project) = args.project {
         return run_project_with_options(
             &project,

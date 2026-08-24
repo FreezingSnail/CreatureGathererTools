@@ -1,4 +1,5 @@
 pub mod carray;
+pub mod equivalence;
 pub mod font;
 pub mod header;
 pub mod image;

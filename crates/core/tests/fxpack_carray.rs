@@ -350,6 +350,46 @@ fn enumerates_types_and_nested_namespaces() {
 }
 
 #[test]
+fn enumerates_legacy_untyped_symbolic_tables() {
+    let declarations = enumerate_declarations(&fixture("legacy-untyped-table.txt")).unwrap();
+
+    assert_eq!(
+        declarations,
+        [Declaration {
+            name: "table".to_owned(),
+            namespace: Some("EventData".to_owned()),
+            ctype: CType::U24,
+            bytes: None,
+            line: 2,
+        }]
+    );
+}
+
+#[test]
+fn enumerates_real_event_declarations_including_legacy_table() {
+    let declarations = declarations("fxdata/data/event.txt");
+
+    assert_eq!(declarations.len(), 10);
+    assert_source_order(&declarations);
+    assert_declaration(
+        &declarations,
+        8,
+        "m1Table",
+        Some("EventData"),
+        CType::U24,
+        18,
+    );
+    assert_declaration(
+        &declarations,
+        9,
+        "eventTable",
+        Some("EventData"),
+        CType::U24,
+        23,
+    );
+}
+
+#[test]
 fn ignores_legacy_untyped_symbolic_tables_without_closing_namespaces() {
     let source = r#"
         namespace EventData {

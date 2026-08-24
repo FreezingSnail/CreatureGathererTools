@@ -38,13 +38,15 @@ pub fn plan(spec: &LayoutSpec, builders: &[BuilderBytes<'_>]) -> anyhow::Result<
     let mut current_namespace = None;
     for entry in &spec.entries {
         if let Source::Expand { path, exclude } = &entry.source {
-            let declarations = carray::enumerate_declarations(path)
+            let declarations = carray::enumerate_expanded_declarations(path)
                 .with_context(|| format!("enumerating expanded source {}", path.display()))?;
             let excluded = exclude.as_deref().unwrap_or_default();
-            for declaration in declarations
-                .into_iter()
-                .filter(|declaration| !excluded.iter().any(|name| name == &declaration.name))
-            {
+            for expanded in declarations.into_iter().filter(|expanded| {
+                !excluded
+                    .iter()
+                    .any(|name| name == &expanded.declaration.name)
+            }) {
+                let declaration = expanded.declaration;
                 transition_namespace(
                     &mut layout,
                     &mut current_namespace,
@@ -62,7 +64,14 @@ pub fn plan(spec: &LayoutSpec, builders: &[BuilderBytes<'_>]) -> anyhow::Result<
                             )
                         })?,
                         FieldKind::Bytes,
-                        FieldSource::CArray { path: path.clone() },
+                        match expanded.source {
+                            carray::DeclarationSource::CArray => {
+                                FieldSource::CArray { path: path.clone() }
+                            }
+                            carray::DeclarationSource::Symbol => {
+                                FieldSource::Symbol { path: path.clone() }
+                            }
+                        },
                     ),
                     carray::CType::U24 | carray::CType::U32 => (
                         symbol::extract_symbol_bytes(

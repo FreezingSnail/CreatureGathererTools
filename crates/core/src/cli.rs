@@ -17,17 +17,38 @@ pub struct Cli {
             "arena_output",
             "type_table_csv",
             "type_table_output",
-            "sprite_config"
+            "sprite_config",
+            "assert_layout_equivalent"
         ]
     )]
     pub project: Option<PathBuf>,
+    /// Assert two complete layout specs produce identical fields and packed bytes.
+    #[arg(
+        long,
+        value_names = ["OLD", "NEW"],
+        num_args = 2,
+        conflicts_with_all = [
+            "project",
+            "input",
+            "output",
+            "opponents_csv",
+            "opponents_output",
+            "arena_csv",
+            "arena_output",
+            "type_table_csv",
+            "type_table_output",
+            "sprite_config"
+        ]
+    )]
+    pub assert_layout_equivalent: Option<Vec<PathBuf>>,
     /// Input .json map / project file (legacy script compiler mode)
     #[arg(required_unless_present_any = [
         "project",
         "opponents_csv",
         "arena_csv",
         "type_table_csv",
-        "sprite_config"
+        "sprite_config",
+        "assert_layout_equivalent"
     ])]
     pub input: Option<PathBuf>,
     /// Output directory for legacy compilation, arena source, or `typetable.bin`.
@@ -36,7 +57,8 @@ pub struct Cli {
         "opponents_csv",
         "arena_csv",
         "type_table_csv",
-        "sprite_config"
+        "sprite_config",
+        "assert_layout_equivalent"
     ])]
     pub output: Option<PathBuf>,
     /// Output directory for Rust-built `opponents.bin`.
@@ -157,6 +179,23 @@ mod tests {
         .expect("pack project invocation parses");
         assert!(cli.pack);
         assert_eq!(cli.layout, Some(PathBuf::from("custom-layout.toml")));
+    }
+
+    #[test]
+    fn layout_equivalence_mode_accepts_two_layouts_without_project() {
+        let cli = Cli::try_parse_from([
+            "cgfx-tools",
+            "--assert-layout-equivalent",
+            "old.toml",
+            "new.toml",
+        ])
+        .expect("equivalence invocation parses");
+        assert_eq!(
+            cli.assert_layout_equivalent,
+            Some(vec![PathBuf::from("old.toml"), PathBuf::from("new.toml")])
+        );
+        assert!(cli.input.is_none());
+        assert!(cli.output.is_none());
     }
 
     #[test]
