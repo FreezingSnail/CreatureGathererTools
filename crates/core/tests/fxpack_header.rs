@@ -1,5 +1,5 @@
 use creaturevm::fxpack::header::render;
-use creaturevm::fxpack::layout::{Field, FieldKind, Offsets};
+use creaturevm::fxpack::layout::{Field, FieldKind, FieldSource, Offsets};
 
 fn offsets(data_page: u16, data_len: u32, save_page: Option<u16>, save_len: u32) -> Offsets {
     Offsets {
@@ -17,9 +17,11 @@ fn bytes_field(name: &str, namespace: Option<&str>, addr: u32) -> Field {
         name: name.to_owned(),
         namespace: namespace.map(str::to_owned),
         addr,
-        len: 1,
+        source_len: 1,
+        span: 1,
         kind: FieldKind::Bytes,
         in_save: false,
+        source: FieldSource::Unknown,
     }
 }
 
@@ -50,13 +52,15 @@ fn renders_image_metadata_triple() {
         name: "fontTrimmed".to_owned(),
         namespace: None,
         addr: 0x054B0A,
-        len: 0,
+        source_len: 0,
+        span: 0,
         kind: FieldKind::Image {
             frames: 75,
             width: 5,
             height: 6,
         },
         in_save: false,
+        source: FieldSource::Unknown,
     }];
 
     let actual = render(&fields, &offsets(0xF6B2, 1, None, 0));

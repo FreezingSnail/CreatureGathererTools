@@ -69,6 +69,11 @@ function mockBoot() {
         });
       case "read_file_bytes":
         return Promise.reject(new Error("no tauri in tests"));
+      case "layout_report":
+        return Promise.resolve({
+          data_page: 0, save_page: 0, data_len: 0, data_len_flash: 0,
+          save_len: 0, save_len_flash: 0, page_size: 256, flash_pages: 0, fields: [],
+        });
       default:
         return Promise.reject(new Error(`unexpected invoke: ${cmd}`));
     }
@@ -139,6 +144,7 @@ describe("App shell", () => {
     expect(await screen.findByTestId("palette")).toBeInTheDocument();
     expect(screen.getByTestId("tab-panel-creature")).toBeInTheDocument();
     expect(screen.getByTestId("tab-panel-move")).toBeInTheDocument();
+    expect(screen.getByTestId("tab-panel-layout")).toBeInTheDocument();
     expect(screen.queryByTestId("setup-dialog")).not.toBeInTheDocument();
   });
 
@@ -150,6 +156,7 @@ describe("App shell", () => {
     const mapPanel = screen.getByTestId("tab-panel-map");
     const creaturePanel = screen.getByTestId("tab-panel-creature");
     const movePanel = screen.getByTestId("tab-panel-move");
+    const layoutPanel = screen.getByTestId("tab-panel-layout");
 
     expect(mapPanel.getAttribute("role")).toBe("tabpanel");
     expect(creaturePanel.getAttribute("role")).toBe("tabpanel");
@@ -158,10 +165,20 @@ describe("App shell", () => {
     expect(mapPanel).toHaveAttribute("data-state", "active");
     expect(creaturePanel).toHaveAttribute("data-state", "inactive");
     expect(movePanel).toHaveAttribute("data-state", "inactive");
+    expect(layoutPanel).toHaveAttribute("data-state", "inactive");
 
-    for (const panel of [mapPanel, creaturePanel, movePanel]) {
+    for (const panel of [mapPanel, creaturePanel, movePanel, layoutPanel]) {
       expect(panel.className).toContain("data-[state=inactive]:hidden");
     }
+  });
+
+  it("opens the mounted Layout tab", async () => {
+    mockBoot();
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole("tab", { name: "Layout" }));
+    expect(screen.getByTestId("tab-panel-layout")).toHaveAttribute("data-state", "active");
+    expect(await screen.findByTestId("layout-empty")).toBeInTheDocument();
   });
 
   it("preserves creature editor state across tab switches", async () => {

@@ -9,18 +9,19 @@ fn sequential_fields_advance_by_written_length() {
     layout.write(&[1, 2, 3]).unwrap();
     assert_eq!(layout.field("second", FieldKind::Bytes), Ok(3));
     layout.write(&[4, 5]).unwrap();
-    assert_eq!(layout.field("third", FieldKind::Bytes), Ok(5));
+    assert_eq!(layout.pad(8, false), 3);
+    assert_eq!(layout.field("third", FieldKind::Bytes), Ok(8));
     assert_eq!(
         layout
             .fields()
             .iter()
-            .map(|field| field.len)
+            .map(|field| (field.source_len, field.span))
             .collect::<Vec<_>>(),
-        vec![3, 2, 0]
+        vec![(3, 3), (2, 5), (0, 0)]
     );
 
     let (offsets, _) = layout.finalize().unwrap();
-    assert_eq!(offsets.data_len, 5);
+    assert_eq!(offsets.data_len, 8);
 }
 
 #[test]

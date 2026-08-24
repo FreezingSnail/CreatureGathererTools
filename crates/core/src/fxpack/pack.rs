@@ -1,10 +1,13 @@
 use anyhow::{Context, bail};
-use std::{collections::BTreeMap, path::{Path, PathBuf}};
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+};
 
 use super::{
     carray, header,
     image::{self, Artifacts},
-    layout::{Field, FieldKind, Layout},
+    layout::{Field, FieldKind, FieldSource, Layout},
     spec::{Entry, LayoutSpec, Source},
     sprite::{self, Params},
     symbol,
@@ -16,19 +19,20 @@ pub struct BuilderBytes<'a> {
     pub namespace: Option<&'a str>,
 }
 
+pub struct PackPlan {
+    pub fields: Vec<Field>,
+    pub offsets: super::layout::Offsets,
+    pub bytes: Vec<u8>,
+}
+
 pub struct PackOutcome {
     pub header: PathBuf,
     pub artifacts: Artifacts,
     pub fields: Vec<Field>,
 }
 
-/// Pack an FX image from raw, C-array, typed-symbol, image, and builder sources.
-pub fn pack(
-    spec: &LayoutSpec,
-    builders: &[BuilderBytes<'_>],
-    out_dir: &Path,
-    header_path: &Path,
-) -> anyhow::Result<PackOutcome> {
+/// Resolve all FX entries and compute their finalized layout without writing artifacts.
+pub fn plan(spec: &LayoutSpec, builders: &[BuilderBytes<'_>]) -> anyhow::Result<PackPlan> {
     validate_builder_keys(spec, builders)?;
     let mut layout = Layout::new();
     let mut current_namespace: Option<&str> = None;
@@ -49,7 +53,7 @@ pub fn pack(
         let offsets = field_offsets(layout.fields());
         let (bytes, kind) = resolve_entry(entry, builders, &offsets)
             .with_context(|| format!("resolving entry {:?}", entry.name))?;
-        layout.field(&entry.name, kind)?;
+        layout.field_with_source(&entry.name, kind, source_metadata(&entry.source))?;
         layout.write(&bytes)?;
     }
     if current_namespace.is_some() {
@@ -64,20 +68,34 @@ pub fn pack(
         }
     }
 
-    let fields = layout.fields().to_vec();
-    let (offsets, bytes) = layout.finalize()?;
-    let header_text = header::render(&fields, &offsets);
+    let (fields, offsets, bytes) = layout.finalize_with_fields()?;
+    Ok(PackPlan {
+        fields,
+        offsets,
+        bytes,
+    })
+}
+
+/// Pack an FX image from raw, C-array, typed-symbol, image, and builder sources.
+pub fn pack(
+    spec: &LayoutSpec,
+    builders: &[BuilderBytes<'_>],
+    out_dir: &Path,
+    header_path: &Path,
+) -> anyhow::Result<PackOutcome> {
+    let plan = plan(spec, builders)?;
+    let header_text = header::render(&plan.fields, &plan.offsets);
     let header_parent = header_path.parent().unwrap_or_else(|| Path::new("."));
     std::fs::create_dir_all(header_parent)
         .with_context(|| format!("creating directory for {}", header_path.display()))?;
     std::fs::write(header_path, header_text)
         .with_context(|| format!("writing {}", header_path.display()))?;
 
-    let artifacts = image::write(&bytes, &offsets, out_dir, "fxdata")?;
+    let artifacts = image::write(&plan.bytes, &plan.offsets, out_dir, "fxdata")?;
     Ok(PackOutcome {
         header: header_path.to_owned(),
         artifacts,
-        fields,
+        fields: plan.fields,
     })
 }
 
@@ -96,9 +114,24 @@ fn field_offsets(fields: &[Field]) -> BTreeMap<String, u32> {
     offsets
 }
 
+fn source_metadata(source: &Source) -> FieldSource {
+    match source {
+        Source::Raw(path) => FieldSource::Raw { path: path.clone() },
+        Source::CArray(spec) => FieldSource::CArray {
+            path: spec.path().to_owned(),
+        },
+        Source::Symbol(spec) => FieldSource::Symbol {
+            path: spec.path.clone(),
+        },
+        Source::Image { path, .. } => FieldSource::Image { path: path.clone() },
+        Source::Builder(key) => FieldSource::Builder { key: key.clone() },
+    }
+}
+
 fn validate_builder_keys(spec: &LayoutSpec, builders: &[BuilderBytes<'_>]) -> anyhow::Result<()> {
     let spec_keys = spec.builder_keys();
     let available: Vec<&str> = builders.iter().map(|builder| builder.key).collect();
+
     for key in &spec_keys {
         if !available.contains(key) {
             bail!("unknown builder key {key:?} in layout spec; available: {available:?}");
@@ -186,7 +219,7 @@ fn resolve_entry(
 #[cfg(test)]
 mod tests {
     use super::field_offsets;
-    use crate::fxpack::layout::{Field, FieldKind};
+    use crate::fxpack::layout::{Field, FieldKind, FieldSource};
 
     #[test]
     fn unqualified_offsets_keep_the_first_declaration_alias() {
@@ -195,17 +228,21 @@ mod tests {
                 name: "attackText".to_owned(),
                 namespace: Some("MenuFXData".to_owned()),
                 addr: 0x08fb,
-                len: 1,
+                source_len: 1,
+                span: 1,
                 kind: FieldKind::Bytes,
                 in_save: false,
+                source: FieldSource::Unknown,
             },
             Field {
                 name: "attackText".to_owned(),
                 namespace: None,
                 addr: 0x4db4a,
-                len: 1,
+                source_len: 1,
+                span: 1,
                 kind: FieldKind::Bytes,
                 in_save: false,
+                source: FieldSource::Unknown,
             },
         ];
         let offsets = field_offsets(&fields);

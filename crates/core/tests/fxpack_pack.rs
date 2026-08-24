@@ -1,7 +1,9 @@
 use creaturevm::fxpack::{
+    layout::{FieldKind, FieldSource},
     pack::{self, BuilderBytes},
-    spec::{Entry, LayoutSpec, Source},
+    spec::{Entry, LayoutSpec, SaveEntry, SaveSpec, Source},
 };
+use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -223,4 +225,119 @@ fn repeated_packs_are_byte_identical() {
         std::fs::read(first_outcome.header).unwrap(),
         std::fs::read(second_outcome.header).unwrap()
     );
+}
+
+#[test]
+fn plan_resolves_padded_namespaced_image_and_save_fields_without_artifacts() {
+    let fixture = TestDir::new();
+    let source_dir = fixture.path().join("sources");
+    std::fs::create_dir_all(&source_dir).unwrap();
+    let raw_path = source_dir.join("raw.bin");
+    std::fs::write(&raw_path, [0x10, 0x20]).unwrap();
+    let image_path = source_dir.join("tile.png");
+    let file = File::create(&image_path).unwrap();
+    let mut encoder = png::Encoder::new(file, 4, 8);
+    encoder.set_color(png::ColorType::Grayscale);
+    encoder.set_depth(png::BitDepth::Eight);
+    encoder
+        .write_header()
+        .unwrap()
+        .write_image_data(&[0; 4 * 8])
+        .unwrap();
+
+    let spec = LayoutSpec {
+        entries: vec![
+            Entry {
+                name: "raw".to_owned(),
+                namespace: Some("Data".to_owned()),
+                source: Source::Raw(raw_path.clone()),
+                align: None,
+            },
+            Entry {
+                name: "tile".to_owned(),
+                namespace: None,
+                source: Source::Image {
+                    path: image_path.clone(),
+                    width: 4,
+                    height: 8,
+                    shades: 4,
+                    spacing: 0,
+                },
+                align: Some(8),
+            },
+        ],
+        save: Some(SaveSpec {
+            sectors: 2,
+            entries: vec![
+                SaveEntry {
+                    name: "save_main".to_owned(),
+                    offset: 0,
+                },
+                SaveEntry {
+                    name: "save_log".to_owned(),
+                    offset: 4096,
+                },
+            ],
+        }),
+    };
+
+    let plan = pack::plan(&spec, &[]).unwrap();
+    assert_eq!(plan.offsets.data_len, 24);
+    assert_eq!(plan.fields.len(), 4);
+    assert_eq!(
+        &plan.fields[0],
+        &creaturevm::fxpack::layout::Field {
+            name: "raw".to_owned(),
+            namespace: Some("Data".to_owned()),
+            addr: 0,
+            source_len: 2,
+            span: 8,
+            kind: FieldKind::Bytes,
+            in_save: false,
+            source: FieldSource::Raw {
+                path: raw_path.clone(),
+            },
+        }
+    );
+    assert_eq!(
+        &plan.fields[1],
+        &creaturevm::fxpack::layout::Field {
+            name: "tile".to_owned(),
+            namespace: None,
+            addr: 8,
+            source_len: 16,
+            span: 16,
+            kind: FieldKind::Image {
+                frames: 1,
+                width: 4,
+                height: 8,
+            },
+            in_save: false,
+            source: FieldSource::Image { path: image_path },
+        }
+    );
+    assert_eq!(
+        plan.fields[2].source,
+        FieldSource::Save,
+        "save fields have no layout source path"
+    );
+    assert_eq!(
+        (
+            plan.fields[2].addr,
+            plan.fields[2].source_len,
+            plan.fields[2].span,
+            plan.fields[2].in_save
+        ),
+        (0, 0, 4096, true)
+    );
+    assert_eq!(
+        (
+            plan.fields[3].addr,
+            plan.fields[3].source_len,
+            plan.fields[3].span,
+            plan.fields[3].in_save
+        ),
+        (4096, 0, 4096, true)
+    );
+    assert!(!fixture.path().join("artifacts").exists());
 }

@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { MapEditor, type EditorDeps } from "./editor";
-import { CreatureEditor, MoveEditor } from "./components";
+import { CreatureEditor, LayoutView, MoveEditor } from "./components";
 import { SetupDialog } from "./SetupDialog";
 import { emptyMap } from "./state";
 import type { Config, GameMap, CompileResult, ParseResult } from "./types";
@@ -18,12 +18,13 @@ import { Card, CardContent } from "./components/ui/card";
 const readBytes = async (path: string): Promise<Uint8Array> =>
   new Uint8Array(await invoke<number[]>("read_file_bytes", { path }));
 
-type TabId = "map" | "creature" | "move";
+type TabId = "map" | "creature" | "move" | "layout";
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "map", label: "Map" },
   { id: "creature", label: "Creature" },
   { id: "move", label: "Move" },
+  { id: "layout", label: "Layout" },
 ];
 
 type Phase = "checking" | "setup" | "editors";
@@ -291,6 +292,16 @@ function App() {
             className="min-h-0 flex-1"
           >
             <MoveEditor key={bootKey} />
+          </TabsContent>
+          <TabsContent
+            value="layout"
+            forceMount
+            id="tab-panel-layout"
+            data-testid="tab-panel-layout"
+            aria-label="layout"
+            className="min-h-0 flex-1"
+          >
+            <LayoutView key={bootKey} />
           </TabsContent>
         </div>
       </Tabs>

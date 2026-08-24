@@ -1,5 +1,7 @@
+use serde::Serialize;
 use std::error::Error;
 use std::fmt;
+use std::path::PathBuf;
 
 pub const PAGE_SIZE: u32 = 256;
 pub const SAVE_SECTOR: u32 = 4096;
@@ -7,7 +9,31 @@ pub const FLASH_PAGES: u32 = 65536;
 
 const MAX_ADDRESS: u32 = 0x00ff_ffff;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "type")]
+pub enum FieldSource {
+    Raw {
+        path: PathBuf,
+    },
+    CArray {
+        path: PathBuf,
+    },
+    Symbol {
+        path: PathBuf,
+    },
+    Image {
+        path: PathBuf,
+    },
+    Builder {
+        key: String,
+    },
+    Save,
+    /// Layout-only field with no pack-spec source.
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum FieldKind {
     Bytes,
     Image {
@@ -17,18 +43,23 @@ pub enum FieldKind {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Field {
     pub name: String,
     /// Optional `::`-separated C++ namespace path for the public field name.
     pub namespace: Option<String>,
     pub addr: u32,
-    pub len: u32,
+    /// Number of source bytes written for this field, excluding alignment padding.
+    pub source_len: u32,
+    /// Address span from this field to the next field in its section, including padding.
+    pub span: u32,
     pub kind: FieldKind,
     pub in_save: bool,
+    /// The layout-spec source that produced this field.
+    pub source: FieldSource,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Offsets {
     pub data_len: u32,
     pub data_len_flash: u32,
@@ -118,6 +149,15 @@ impl Layout {
     }
 
     pub fn field(&mut self, name: &str, kind: FieldKind) -> Result<u32, LayoutError> {
+        self.field_with_source(name, kind, FieldSource::Unknown)
+    }
+
+    pub fn field_with_source(
+        &mut self,
+        name: &str,
+        kind: FieldKind,
+        source: FieldSource,
+    ) -> Result<u32, LayoutError> {
         self.backfill_previous_field();
         let addr = self.address();
         if addr > MAX_ADDRESS {
@@ -127,9 +167,11 @@ impl Layout {
             name: name.to_owned(),
             namespace: self.namespace.clone(),
             addr,
-            len: 0,
+            source_len: 0,
+            span: 0,
             kind,
             in_save: self.save_start.is_some(),
+            source,
         });
         Ok(addr)
     }
@@ -143,6 +185,11 @@ impl Layout {
             }
         }
         self.bytes.extend_from_slice(bytes);
+        if let Some(field) = self.fields.last_mut()
+            && field.in_save == self.save_start.is_some()
+        {
+            field.source_len = field.source_len.saturating_add(bytes.len() as u32);
+        }
         Ok(())
     }
 
@@ -193,14 +240,20 @@ impl Layout {
         if offset % SAVE_SECTOR != 0 {
             return Err(LayoutError::SaveOffsetUnaligned(offset));
         }
-        self.backfill_previous_field();
+        if self.fields.last().is_some_and(|field| field.in_save) {
+            self.backfill_previous_field_to(offset);
+        } else {
+            self.backfill_previous_field();
+        }
         self.fields.push(Field {
             name: name.to_owned(),
             namespace: None,
             addr: offset,
-            len: 0,
+            source_len: 0,
+            span: 0,
             kind: FieldKind::Bytes,
             in_save: true,
+            source: FieldSource::Save,
         });
         Ok(())
     }
@@ -214,7 +267,13 @@ impl Layout {
         &self.fields
     }
 
-    pub fn finalize(mut self) -> Result<(Offsets, Vec<u8>), LayoutError> {
+    pub fn finalize(self) -> Result<(Offsets, Vec<u8>), LayoutError> {
+        self.finalize_with_fields()
+            .map(|(_, offsets, bytes)| (offsets, bytes))
+    }
+
+    /// Finalize the byte layout while retaining fields with their completed spans.
+    pub fn finalize_with_fields(mut self) -> Result<(Vec<Field>, Offsets, Vec<u8>), LayoutError> {
         if let Some(namespace) = self.namespace {
             return Err(LayoutError::UnterminatedNamespace(namespace));
         }
@@ -243,6 +302,7 @@ impl Layout {
         let save_page = self.save_start.map(|_| (FLASH_PAGES - save_pages) as u16);
 
         Ok((
+            self.fields,
             Offsets {
                 data_len,
                 data_len_flash,
@@ -256,15 +316,21 @@ impl Layout {
     }
 
     fn backfill_previous_field(&mut self) {
+        let section_len = match self.fields.last() {
+            Some(previous) if previous.in_save => {
+                self.bytes.len() - self.save_start.expect("save fields require a save section")
+            }
+            Some(_) => self.data_len.unwrap_or(self.bytes.len()),
+            None => return,
+        };
+        self.backfill_previous_field_to(section_len as u32);
+    }
+
+    fn backfill_previous_field_to(&mut self, end: u32) {
         let Some(previous) = self.fields.last_mut() else {
             return;
         };
-        let section_len = if previous.in_save {
-            self.bytes.len() - self.save_start.expect("save fields require a save section")
-        } else {
-            self.data_len.unwrap_or(self.bytes.len())
-        };
-        previous.len = (section_len as u32).saturating_sub(previous.addr);
+        previous.span = end.saturating_sub(previous.addr);
     }
 
     fn length_u32(length: usize) -> Result<u32, LayoutError> {

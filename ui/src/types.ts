@@ -73,3 +73,34 @@ export interface CompileResult {
   errors: CompileError[];
   artifacts: string[];
 }
+
+export interface LayoutImage {
+  frames: number;
+  width: number;
+  height: number;
+}
+
+export interface LayoutField {
+  name: string;
+  namespace: string;
+  addr: number;
+  len: number;
+  span: number;
+  kind: "bytes" | "image";
+  in_save: boolean;
+  source: "raw" | "carray" | "symbol" | "image" | "builder";
+  path: string;
+  image?: LayoutImage;
+}
+
+export interface LayoutReport {
+  data_page: number;
+  save_page: number;
+  data_len: number;
+  data_len_flash: number;
+  save_len: number;
+  save_len_flash: number;
+  page_size: number;
+  flash_pages: number;
+  fields: LayoutField[];
+}

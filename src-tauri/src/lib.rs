@@ -5,10 +5,16 @@
 
 use std::collections::HashMap;
 use std::fmt::Display;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use creaturevm::builder;
 use creaturevm::config::Config;
+use creaturevm::fxpack::{
+    layout::{Field, FieldKind, FieldSource, FLASH_PAGES, PAGE_SIZE},
+    pack::{self, BuilderBytes, PackPlan},
+    spec::LayoutSpec,
+};
 use creaturevm::model::{Creature, GameMap, Move};
 use creaturevm::processor::ast::{Branch, Cmd, Condition, Location};
 use creaturevm::script::{self, Controller};
@@ -62,6 +68,163 @@ pub struct ParseResult {
     pub ok: bool,
     pub errors: Vec<ScriptErr>,
     pub cmds: Option<Vec<CmdJson>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LayoutImage {
+    pub frames: u16,
+    pub width: u16,
+    pub height: u16,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LayoutField {
+    pub name: String,
+    pub namespace: Option<String>,
+    pub addr: u32,
+    pub len: u32,
+    pub span: u32,
+    pub kind: String,
+    pub in_save: bool,
+    pub source: String,
+    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image: Option<LayoutImage>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LayoutReport {
+    pub data_page: u16,
+    pub save_page: u16,
+    pub data_len: u32,
+    pub data_len_flash: u32,
+    pub save_len: u32,
+    pub save_len_flash: u32,
+    pub page_size: u32,
+    pub flash_pages: u32,
+    pub fields: Vec<LayoutField>,
+}
+
+fn builder_bin_name(key: &str) -> &str {
+    match key {
+        "creature_data" => "creatureData.bin",
+        "move_table" => "moves.bin",
+        "opponents" => "opponents.bin",
+        "type_table" => "typetable.bin",
+        "map_data" => "map.bin",
+        "raw_map" => "raw_map.bin",
+        "text" => "text.bin",
+        "scripts" => "scripts.bin",
+        "tool_version" => "tool_version.bin",
+        other => other,
+    }
+}
+
+fn load_layout_builders<'a>(
+    spec: &'a LayoutSpec,
+    output_dir: &Path,
+) -> Result<(Vec<BuilderBytes<'a>>, HashMap<String, PathBuf>), String> {
+    let mut builders = Vec::new();
+    let mut paths = HashMap::new();
+    for key in spec.builder_keys() {
+        let path = output_dir.join(builder_bin_name(key));
+        if !path.is_file() {
+            return Err(format!(
+                "missing builder {key:?} at {}; run Compile all",
+                path.display()
+            ));
+        }
+        let bytes = std::fs::read(&path)
+            .map_err(|e| format!("reading builder {key:?} from {}: {e}", path.display()))?;
+        paths.insert(key.to_owned(), path);
+        builders.push(BuilderBytes {
+            key,
+            bytes,
+            namespace: None,
+        });
+    }
+    Ok((builders, paths))
+}
+
+fn layout_field(field: Field, builder_paths: &HashMap<String, PathBuf>) -> LayoutField {
+    let (kind, image) = match field.kind {
+        FieldKind::Bytes => ("bytes".to_owned(), None),
+        FieldKind::Image {
+            frames,
+            width,
+            height,
+        } => (
+            "image".to_owned(),
+            Some(LayoutImage {
+                frames,
+                width,
+                height,
+            }),
+        ),
+    };
+    let (source, path) = match field.source {
+        FieldSource::Raw { path } => ("raw", path),
+        FieldSource::CArray { path } => ("carray", path),
+        FieldSource::Symbol { path } => ("symbol", path),
+        FieldSource::Image { path } => ("image", path),
+        FieldSource::Builder { key } => (
+            "builder",
+            builder_paths
+                .get(&key)
+                .cloned()
+                .unwrap_or_else(|| PathBuf::from(key)),
+        ),
+        FieldSource::Save | FieldSource::Unknown => ("raw", PathBuf::new()),
+    };
+    LayoutField {
+        name: field.name,
+        namespace: field.namespace,
+        addr: field.addr,
+        len: field.source_len,
+        span: field.span,
+        kind,
+        in_save: field.in_save,
+        source: source.to_owned(),
+        path: path.to_string_lossy().into_owned(),
+        image,
+    }
+}
+
+fn layout_report_from_plan(
+    plan: PackPlan,
+    builder_paths: &HashMap<String, PathBuf>,
+) -> LayoutReport {
+    LayoutReport {
+        data_page: plan.offsets.data_page,
+        save_page: plan.offsets.save_page.unwrap_or(0),
+        data_len: plan.offsets.data_len,
+        data_len_flash: plan.offsets.data_len_flash,
+        save_len: plan.offsets.save_len,
+        save_len_flash: plan.offsets.save_len_flash,
+        page_size: PAGE_SIZE,
+        flash_pages: FLASH_PAGES,
+        fields: plan
+            .fields
+            .into_iter()
+            .map(|field| layout_field(field, builder_paths))
+            .collect(),
+    }
+}
+
+fn layout_report_impl(cfg: &Config, project_root: &Path) -> Result<LayoutReport, String> {
+    let layout_path = project_root.join("fxlayout.toml");
+    let spec = LayoutSpec::load(&layout_path)
+        .map_err(|e| format!("loading layout spec {}: {e}", layout_path.display()))?;
+    let (builders, builder_paths) = load_layout_builders(&spec, Path::new(&cfg.output_dir))?;
+    let plan = pack::plan(&spec, &builders).map_err(err_str)?;
+    Ok(layout_report_from_plan(plan, &builder_paths))
+}
+
+#[tauri::command]
+fn layout_report(state: State<Mutex<AppState>>) -> Result<LayoutReport, String> {
+    let st = state.lock().map_err(err_str)?;
+    let project_root = std::env::current_dir().map_err(err_str)?;
+    layout_report_impl(&st.config, &project_root)
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -442,6 +605,7 @@ pub fn run() {
             save_moves,
             compile_map,
             compile_all,
+            layout_report,
             parse_script,
             read_file_bytes,
             tiled_import_path,
@@ -599,6 +763,74 @@ mod tests {
             },
         };
         assert_eq!(cmd.to_bytes(), vec![0, 0, 3]);
+    }
+
+    #[test]
+    fn layout_report_serializes_success_shape() {
+        let report = layout_report_from_plan(
+            PackPlan {
+                fields: vec![Field {
+                    name: "portrait".into(),
+                    namespace: Some("Ui".into()),
+                    addr: 12,
+                    source_len: 8,
+                    span: 16,
+                    kind: FieldKind::Image {
+                        frames: 2,
+                        width: 16,
+                        height: 32,
+                    },
+                    in_save: false,
+                    source: FieldSource::Image {
+                        path: PathBuf::from("sprites/portrait.png"),
+                    },
+                }],
+                offsets: creaturevm::fxpack::layout::Offsets {
+                    data_page: 42,
+                    save_page: Some(65_000),
+                    data_len: 20,
+                    data_len_flash: 256,
+                    save_len: 4_096,
+                    save_len_flash: 4_096,
+                },
+                bytes: vec![],
+            },
+            &HashMap::new(),
+        );
+        let value = serde_json::to_value(report).expect("report must serialize");
+        assert_eq!(value["data_page"], 42);
+        assert_eq!(value["save_page"], 65_000);
+        assert_eq!(value["page_size"], PAGE_SIZE);
+        assert_eq!(value["flash_pages"], FLASH_PAGES);
+        assert_eq!(value["fields"][0]["len"], 8);
+        assert_eq!(value["fields"][0]["span"], 16);
+        assert_eq!(value["fields"][0]["kind"], "image");
+        assert_eq!(value["fields"][0]["source"], "image");
+        assert_eq!(value["fields"][0]["path"], "sprites/portrait.png");
+        assert_eq!(value["fields"][0]["image"]["frames"], 2);
+    }
+
+    #[test]
+    fn layout_report_missing_builder_names_path_and_compile_all() {
+        use creaturevm::fxpack::spec::{Entry, LayoutSpec, Source};
+
+        let spec = LayoutSpec {
+            entries: vec![Entry {
+                name: "map".into(),
+                namespace: None,
+                source: Source::Builder("map_data".into()),
+                align: None,
+            }],
+            save: None,
+        };
+        let output_dir = Path::new("/nonexistent/layout-report-output");
+        let error = match load_layout_builders(&spec, output_dir) {
+            Err(error) => error,
+            Ok(_) => panic!("builder must be missing"),
+        };
+        assert!(error.contains("missing builder \"map_data\""));
+        assert!(error.contains("/nonexistent/layout-report-output/map.bin"));
+        assert!(error.contains("run Compile all"));
     }
 
     #[test]
