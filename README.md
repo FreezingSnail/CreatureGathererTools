@@ -1,6 +1,6 @@
 # CreatureGathererTools
 
-Authoring toolchain for **CreatureGathererFX**, a GBA creature-battler (pixel arthouse game). Turns human-authored game content into engine-ready artifacts: C headers and a **PokerVM** binary bytecode blob (run by a VM from SPI-flash).
+Authoring toolchain for **CreatureGathererFX**, an Arduboy FX demake and creature-collecting game. Turns human-authored game content into engine-ready artifacts: C headers and a **PokerVM** binary bytecode blob (run by a VM from SPI-flash).
 
 ![Map editor](screenshots/map-editor.png)
 
