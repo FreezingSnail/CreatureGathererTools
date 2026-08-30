@@ -13,6 +13,7 @@ import {
 } from "../wfc";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
+import { RecipePanel } from "./RecipePanel";
 
 const DEFAULT_PROJECT: WfcProject = {
   version: 1,
@@ -221,6 +222,15 @@ export function WfcTab({ map, config, tiles: suppliedTiles = EMPTY_TILES, onMapC
         <span className="text-muted-foreground">Pieces are sliced at this project grid; changes never silently reinterpret captured tiles.</span>
       </div>
       {slotError && <div role="alert" className="mb-3 rounded border border-destructive p-2 text-destructive">{slotError}</div>}
+      <RecipePanel
+        project={project}
+        pieces={project.pieces}
+        tiles={tiles}
+        map={map}
+        onProjectChange={persist}
+        onMapChange={onMapChange}
+        saveMap={saveMap}
+      />
       <div className="grid gap-3 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
         <section aria-label="Piece library">
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
