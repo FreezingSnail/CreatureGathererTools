@@ -153,6 +153,8 @@ pub fn import(json: &str) -> Result<GameMap, TiledError> {
         collision_types: Vec::new(),
         encounters,
         encounter_zones: Vec::new(),
+        wfc: None,
+        stamps: Vec::new(),
     })
 }
 

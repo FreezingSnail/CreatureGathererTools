@@ -81,6 +81,8 @@ fn empty_map() -> GameMap {
         collision_types: vec![],
         encounters: vec![],
         encounter_zones: vec![],
+        wfc: None,
+        stamps: vec![],
     }
 }
 

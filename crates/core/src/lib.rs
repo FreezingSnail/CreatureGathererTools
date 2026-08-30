@@ -11,6 +11,7 @@ pub mod processor;
 pub mod script;
 pub mod store;
 pub mod tiled;
+pub mod wfcmap;
 pub mod writer;
 use anyhow::Context;
 use clap::Parser;

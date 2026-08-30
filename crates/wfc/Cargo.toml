@@ -1,0 +1,13 @@
+[package]
+name = "cgfx-wfc"
+version = "0.1.0"
+edition = "2024"
+
+# Deliberately dependency-free: the solver's output must stay byte-stable
+# across toolchain and dependency upgrades, so the RNG is vendored in rng.rs
+# rather than pulled from `rand`.
+[dependencies]
+
+[lib]
+name = "cgfx_wfc"
+path = "src/lib.rs"

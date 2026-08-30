@@ -10,6 +10,7 @@ pub const CHUNK_ROWS: i32 = MAP_H / CHUNK_H; // 64
 pub const TOTAL_CHUNKS: usize = (CHUNK_COLS * CHUNK_ROWS) as usize;
 
 use crate::processor::ast::Cmd;
+use crate::wfcmap::{Stamp, WfcProject};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -226,4 +227,10 @@ pub struct GameMap {
     pub encounters: Vec<Vec<i32>>,
     #[serde(default)]
     pub encounter_zones: Vec<EncounterZone>,
+    /// Optional WFC input project; omitted from ordinary maps.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wfc: Option<WfcProject>,
+    /// Tile-only stamp library, independent of WFC project data.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stamps: Vec<Stamp>,
 }
