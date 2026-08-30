@@ -11,6 +11,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type MutableRefObject,
 } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import type { Config, GameMap, ParseResult, CompileResult } from "./types";
 import {
   initialState,
@@ -29,6 +30,11 @@ import { MapCanvas } from "./canvas";
 import { Palette } from "./palette";
 import { ScriptPane } from "./scriptPane";
 import { Button } from "@/components/ui/button";
+
+/** Call Tiled import with the open map so backend merge preserves WFC data. */
+export function importTiledMap(path: string, current: GameMap): Promise<GameMap> {
+  return invoke<GameMap>("tiled_import_path", { path, current });
+}
 
 export interface EditorDeps {
   readBytes: (path: string) => Promise<Uint8Array>;

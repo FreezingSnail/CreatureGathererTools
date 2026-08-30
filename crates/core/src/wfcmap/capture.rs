@@ -1,6 +1,8 @@
 use std::error::Error;
 use std::fmt;
 
+use serde::{Deserialize, Serialize};
+
 use super::{WfcPiece, encode};
 
 const MAP_SIZE: u32 = 256;
@@ -26,14 +28,14 @@ impl fmt::Display for CaptureError {
 
 impl Error for CaptureError {}
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CaptureOpts {
     pub name: String,
     pub weight: f32,
     pub limit: Option<u32>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TileRect {
     pub x: u32,
     pub y: u32,

@@ -40,6 +40,102 @@ export interface EncounterZone {
   creature_ids: number[];
 }
 
+export type Side = "n" | "e" | "s" | "w";
+
+export type SocketKind = "symmetric" | { directed: { partner: number } };
+
+export interface EdgeSocket {
+  side: Side;
+  index: number;
+  label: number;
+}
+
+export interface SocketLabel {
+  id: number;
+  name: string;
+  kind: SocketKind;
+}
+
+export interface WfcPiece {
+  id: number;
+  name: string;
+  tw: number;
+  th: number;
+  tiles: string;
+  weight: number;
+  limit?: number;
+  edge_overrides: EdgeSocket[];
+  tags: string[];
+}
+
+export interface Anchor {
+  piece_id: number;
+  sx: number;
+  sy: number;
+}
+
+export interface WfcRecipe {
+  id: number;
+  name: string;
+  piece_ids: number[];
+  size_w: number;
+  size_h: number;
+  seed: number;
+  anchors: Anchor[];
+  socket_compat: [number, number][];
+}
+
+export interface WfcProject {
+  version: number;
+  slot_w: number;
+  slot_h: number;
+  pieces: WfcPiece[];
+  socket_labels: SocketLabel[];
+  recipes: WfcRecipe[];
+}
+
+export interface StampOrigin {
+  recipe_id: number;
+  seed: number;
+  slot_w: number;
+  slot_h: number;
+}
+
+export interface Stamp {
+  id: number;
+  name: string;
+  w: number;
+  h: number;
+  tiles: string;
+  origin?: StampOrigin;
+}
+
+export interface Hunk {
+  w: number;
+  h: number;
+  slot_w: number;
+  slot_h: number;
+  tiles: number[];
+  slots: number[];
+  seed: number;
+  attempts: number;
+}
+
+export type ValidationIssue = string;
+
+export interface TileRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export interface CaptureOpts {
+  name: string;
+  weight: number;
+  limit?: number;
+}
+
 export interface GameMap {
   width: number;
   height: number;
@@ -50,6 +146,8 @@ export interface GameMap {
   collision_types: CollisionType[];
   encounters: number[][]; // -1 = none, else EncounterZone.ID
   encounter_zones: EncounterZone[];
+  wfc?: WfcProject;
+  stamps?: Stamp[];
 }
 
 export interface ScriptErr {

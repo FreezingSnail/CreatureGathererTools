@@ -1,0 +1,32 @@
+{
+  "width": 2,
+  "height": 1,
+  "layers": [
+    {
+      "name": "map",
+      "type": "tilelayer",
+      "width": 2,
+      "height": 1,
+      "data": [7, 8]
+    },
+    {
+      "name": "scripts",
+      "type": "objectgroup",
+      "objects": [
+        {
+          "id": 22,
+          "x": 16,
+          "y": 0,
+          "properties": [{ "name": "script", "type": "string", "value": "msg {imported}" }]
+        }
+      ]
+    },
+    {
+      "name": "locations",
+      "type": "objectgroup",
+      "objects": [
+        { "id": 23, "name": "@imported", "x": 0, "y": 0 }
+      ]
+    }
+  ]
+}

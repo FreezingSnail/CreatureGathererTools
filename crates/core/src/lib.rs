@@ -15,10 +15,280 @@ pub mod wfcmap;
 pub mod writer;
 use anyhow::Context;
 use clap::Parser;
+use std::collections::BTreeMap;
+use std::error::Error;
+use std::fmt;
 use std::path::{Path, PathBuf};
+
+use cgfx_wfc::WfcError;
+use serde::Serialize;
+
+use crate::cli::{Command, WfcCommand, WfcGenerate};
+use crate::model::GameMap;
+use crate::wfcmap::{
+    GenerateError, Stamp, StampOrigin, WfcProject, compile_recipe_for_size, encode, generate,
+};
+
+/// A command-specific failure with a stable process exit code.
+#[derive(Debug)]
+pub struct CliFailure {
+    code: i32,
+    message: String,
+}
+
+impl CliFailure {
+    fn invalid(message: impl Into<String>) -> Self {
+        Self {
+            code: 2,
+            message: message.into(),
+        }
+    }
+
+    fn contradiction(message: impl Into<String>) -> Self {
+        Self {
+            code: 3,
+            message: message.into(),
+        }
+    }
+
+    fn budget(message: impl Into<String>) -> Self {
+        Self {
+            code: 4,
+            message: message.into(),
+        }
+    }
+}
+
+impl fmt::Display for CliFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl Error for CliFailure {}
+
+/// Returns the WFC command's documented status code, or the legacy error code.
+pub fn exit_code(error: &anyhow::Error) -> i32 {
+    error
+        .downcast_ref::<CliFailure>()
+        .map_or(1, |error| error.code)
+}
+
+#[derive(Serialize)]
+struct HunkDump {
+    w: u32,
+    h: u32,
+    slot_w: u32,
+    slot_h: u32,
+    tiles: String,
+    seed: u64,
+    attempts: u32,
+}
+
+fn run_command(command: Command) -> anyhow::Result<()> {
+    match command {
+        Command::Wfc(WfcCommand::Generate(args)) => run_wfc_generate(args),
+    }
+}
+
+fn run_wfc_generate(args: WfcGenerate) -> anyhow::Result<()> {
+    if !args.dry_run && args.out.is_none() && !args.in_place {
+        return Err(CliFailure::invalid("specify --out <FILE> or --in-place").into());
+    }
+    if args.in_place && args.stamp_name.is_none() && !args.dry_run {
+        return Err(CliFailure::invalid("--in-place requires --stamp-name NAME").into());
+    }
+
+    let bytes =
+        std::fs::read(&args.map).with_context(|| format!("reading map {}", args.map.display()))?;
+    let mut map: GameMap = serde_json::from_slice(&bytes).map_err(|error| {
+        CliFailure::invalid(format!("parsing map {}: {error}", args.map.display()))
+    })?;
+    let project = map.wfc.as_ref().ok_or_else(|| {
+        CliFailure::invalid(format!(
+            "map {} does not contain a WFC project",
+            args.map.display()
+        ))
+    })?;
+    project.validate().map_err(validation_failure)?;
+    let recipe_id = resolve_recipe(project, &args.recipe)?;
+    let recipe = project
+        .recipes
+        .iter()
+        .find(|recipe| recipe.id == recipe_id)
+        .expect("resolved recipe exists");
+    let recipe_name = recipe.name.clone();
+    let hunk = generate(project, recipe_id, args.size, args.seed).map_err(generate_failure)?;
+    let compiled = compile_recipe_for_size(
+        project,
+        recipe,
+        args.size.unwrap_or((recipe.size_w, recipe.size_h)),
+    )
+    .map_err(generate_failure)?;
+
+    let slot_names: Vec<&str> = hunk
+        .slots
+        .iter()
+        .map(|&symbol| {
+            let piece_id = compiled
+                .symbols
+                .get(symbol as usize)
+                .expect("generator only returns compiled symbols")
+                .piece_id;
+            project
+                .pieces
+                .iter()
+                .find(|piece| piece.id == piece_id)
+                .expect("compiled symbols originate from project pieces")
+                .name
+                .as_str()
+        })
+        .collect();
+    let mut counts = BTreeMap::<&str, u32>::new();
+    for &name in &slot_names {
+        *counts.entry(name).or_default() += 1;
+    }
+
+    if args.dry_run {
+        print_dry_run(&slot_names, &counts, hunk.w / hunk.slot_w);
+    } else if let Some(path) = args.out {
+        let dump = HunkDump {
+            w: hunk.w,
+            h: hunk.h,
+            slot_w: hunk.slot_w,
+            slot_h: hunk.slot_h,
+            tiles: encode(&hunk.tiles),
+            seed: hunk.seed,
+            attempts: hunk.attempts,
+        };
+        let dump = serde_json::to_string_pretty(&dump).context("serializing generated hunk")?;
+        std::fs::write(&path, dump).with_context(|| format!("writing hunk {}", path.display()))?;
+    } else {
+        let stamp_name = args.stamp_name.expect("checked before map mutation");
+        let stamp_id = map
+            .stamps
+            .iter()
+            .map(|stamp| stamp.id)
+            .max()
+            .map_or(Ok(1), |id| {
+                id.checked_add(1)
+                    .ok_or_else(|| CliFailure::invalid("stamp ID overflow"))
+            })?;
+        map.stamps.push(Stamp {
+            id: stamp_id,
+            name: stamp_name,
+            w: hunk.w,
+            h: hunk.h,
+            tiles: encode(&hunk.tiles),
+            origin: Some(StampOrigin {
+                recipe_id,
+                seed: hunk.seed,
+                slot_w: hunk.slot_w,
+                slot_h: hunk.slot_h,
+            }),
+        });
+        let saved =
+            serde_json::to_string_pretty(&map).context("serializing map with generated stamp")?;
+        std::fs::write(&args.map, saved)
+            .with_context(|| format!("writing map {}", args.map.display()))?;
+    }
+
+    println!(
+        "wfc generate: recipe {}; seed {}; attempts {}; hunk {}x{} tiles ({}x{} slots); {} distinct pieces",
+        recipe_name,
+        hunk.seed,
+        hunk.attempts,
+        hunk.w,
+        hunk.h,
+        hunk.w / hunk.slot_w,
+        hunk.h / hunk.slot_h,
+        counts.len(),
+    );
+    Ok(())
+}
+
+fn print_dry_run(slot_names: &[&str], counts: &BTreeMap<&str, u32>, slots_w: u32) {
+    println!("slot grid:");
+    for row in slot_names.chunks(slots_w as usize) {
+        println!("{}", row.join(" "));
+    }
+    println!("piece counts:");
+    for (name, count) in counts {
+        println!("{name}: {count}");
+    }
+}
+
+fn resolve_recipe(project: &WfcProject, requested: &str) -> Result<u32, CliFailure> {
+    if let Ok(id) = requested.parse::<u32>()
+        && project.recipes.iter().any(|recipe| recipe.id == id)
+    {
+        return Ok(id);
+    }
+    let matches: Vec<_> = project
+        .recipes
+        .iter()
+        .filter(|recipe| recipe.name == requested)
+        .collect();
+    match matches.as_slice() {
+        [recipe] => Ok(recipe.id),
+        [] => Err(CliFailure::invalid(format!(
+            "unknown WFC recipe {requested:?}; available recipes: {}",
+            recipe_names(project)
+        ))),
+        _ => Err(CliFailure::invalid(format!(
+            "ambiguous WFC recipe name {requested:?}; candidates: {}",
+            matches
+                .iter()
+                .map(|recipe| format!("{} ({})", recipe.name, recipe.id))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))),
+    }
+}
+
+fn recipe_names(project: &WfcProject) -> String {
+    let names: Vec<_> = project
+        .recipes
+        .iter()
+        .map(|recipe| recipe.name.as_str())
+        .collect();
+    if names.is_empty() {
+        "(none)".to_string()
+    } else {
+        names.join(", ")
+    }
+}
+
+fn validation_failure(issues: Vec<String>) -> CliFailure {
+    CliFailure::invalid(format!("invalid WFC project:\n{}", issues.join("\n")))
+}
+
+fn generate_failure(error: GenerateError) -> CliFailure {
+    match &error {
+        GenerateError::Validation(issues) => validation_failure(issues.clone()),
+        GenerateError::UnknownRecipe(_) | GenerateError::NoPieces => {
+            CliFailure::invalid(error.to_string())
+        }
+        GenerateError::AnchorOutOfBounds { .. } | GenerateError::AnchorOverlap { .. } => {
+            CliFailure::invalid(error.to_string())
+        }
+        GenerateError::LimitUnsatisfied { .. } => CliFailure::budget(error.to_string()),
+        GenerateError::Solver(WfcError::Contradiction { .. }) => {
+            CliFailure::contradiction(error.to_string())
+        }
+        GenerateError::Solver(WfcError::MemoryBudget { .. } | WfcError::BudgetExceeded { .. }) => {
+            CliFailure::budget(error.to_string())
+        }
+        GenerateError::Solver(_) => CliFailure::invalid(error.to_string()),
+    }
+}
 
 pub fn run() -> anyhow::Result<()> {
     let args = cli::Cli::parse();
+
+    if let Some(command) = args.command {
+        return run_command(command);
+    }
 
     if let Some(layouts) = args.assert_layout_equivalent {
         fxpack::equivalence::assert_layout_files_equivalent(&layouts[0], &layouts[1])?;

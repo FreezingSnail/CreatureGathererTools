@@ -9,7 +9,7 @@ pub mod socket;
 
 pub use bake::{Hunk, bake};
 pub use capture::{CaptureError, CaptureOpts, TileRect, capture_piece};
-pub use compile::{CompiledRecipe, SymbolInfo, compile_recipe};
+pub use compile::{CompiledRecipe, SymbolInfo, compile_recipe, compile_recipe_for_size};
 pub use generate::{GenerateError, generate};
 pub use rle::{RleError, decode, encode};
 pub use schema::{

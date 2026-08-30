@@ -19,6 +19,10 @@ use creaturevm::model::{Creature, GameMap, Move};
 use creaturevm::processor::ast::{Branch, Cmd, Condition, Location};
 use creaturevm::script::{self, Controller};
 use creaturevm::store::Store;
+use creaturevm::wfcmap::{
+    capture_piece as capture_wfc_piece, generate as generate_wfc, CaptureOpts, Hunk, TileRect,
+    ValidationIssue, WfcPiece, WfcProject,
+};
 use serde::Serialize;
 use tauri::{Manager, State};
 
@@ -564,14 +568,60 @@ fn parse_script(src: String) -> ParseResult {
     parse_script_impl(&src)
 }
 
+#[tauri::command]
+fn capture_piece(map: GameMap, rect: TileRect, opts: CaptureOpts) -> Result<WfcPiece, String> {
+    let project = map
+        .wfc
+        .as_ref()
+        .ok_or_else(|| "map has no WFC project; create one before capturing a piece".to_string())?;
+    let next_id = project
+        .pieces
+        .iter()
+        .map(|piece| piece.id)
+        .max()
+        .unwrap_or(0)
+        .checked_add(1)
+        .ok_or_else(|| "cannot allocate WFC piece id: id space exhausted".to_string())?;
+    capture_wfc_piece(
+        &map.tiles,
+        rect,
+        project.slot_w,
+        project.slot_h,
+        next_id,
+        &opts,
+    )
+    .map_err(err_str)
+}
+
+#[tauri::command]
+fn wfc_generate(
+    project: WfcProject,
+    recipe_id: u32,
+    size: Option<(u32, u32)>,
+    seed: Option<u64>,
+) -> Result<Hunk, String> {
+    generate_wfc(&project, recipe_id, size, seed)
+        .map_err(|error| format!("WFC generation failed: {error}"))
+}
+
+#[tauri::command]
+fn wfc_validate(project: WfcProject) -> Result<Vec<ValidationIssue>, String> {
+    Ok(project.validate().err().unwrap_or_default())
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // Tiled JSON interchange
 // ─────────────────────────────────────────────────────────────────────
 
 #[tauri::command]
-fn tiled_import_path(path: String) -> Result<GameMap, String> {
+fn tiled_import_path(path: String, current: GameMap) -> Result<GameMap, String> {
     let data = std::fs::read_to_string(&path).map_err(err_str)?;
-    creaturevm::tiled::import(&data).map_err(|e| e.0)
+    let mut imported = creaturevm::tiled::import(&data).map_err(|e| e.0)?;
+    // Tiled has no WFC or stamp representation. Preserve the canonical
+    // libraries from the map currently open instead of silently deleting them.
+    imported.wfc = current.wfc;
+    imported.stamps = current.stamps;
+    Ok(imported)
 }
 
 #[tauri::command]
@@ -640,6 +690,9 @@ pub fn run() {
             layout_report,
             parse_script,
             read_file_bytes,
+            capture_piece,
+            wfc_generate,
+            wfc_validate,
             tiled_import_path,
             tiled_export_path,
         ])
@@ -655,6 +708,7 @@ pub fn run() {
 mod tests {
     use super::*;
     use creaturevm::processor::ast::{Text, ToBytecode};
+    use creaturevm::wfcmap::{EdgeSocket, Side, SocketKind, SocketLabel, Stamp, WfcRecipe};
 
     #[test]
     fn parse_script_valid_reports_cmd_json() {
@@ -931,5 +985,209 @@ mod tests {
         let r = read_file_bytes_impl("/nonexistent/definitely-missing.png");
         assert!(r.is_err());
         assert!(r.unwrap_err().contains("No such file"));
+    }
+
+    fn wfc_test_project() -> WfcProject {
+        WfcProject {
+            version: 1,
+            slot_w: 1,
+            slot_h: 1,
+            pieces: vec![WfcPiece {
+                id: 7,
+                name: "piece".into(),
+                tw: 1,
+                th: 1,
+                tiles: "3".into(),
+                weight: 1.0,
+                limit: None,
+                edge_overrides: Vec::new(),
+                tags: Vec::new(),
+            }],
+            socket_labels: Vec::new(),
+            recipes: vec![],
+        }
+    }
+
+    #[test]
+    fn tiled_import_preserves_wfc_and_stamps_while_replacing_map_data() {
+        let mut current = GameMap {
+            width: 1,
+            height: 1,
+            tiles: vec![vec![99]],
+            npcs: Vec::new(),
+            scripts: Vec::new(),
+            collision: vec![vec![0]],
+            collision_types: Vec::new(),
+            encounters: vec![vec![-1]],
+            encounter_zones: Vec::new(),
+            wfc: Some(wfc_test_project()),
+            stamps: vec![Stamp {
+                id: 4,
+                name: "saved".into(),
+                w: 1,
+                h: 1,
+                tiles: "8".into(),
+                origin: None,
+            }],
+        };
+        let expected_wfc = current.wfc.clone();
+        let expected_stamps = current.stamps.clone();
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/tiled_import.json");
+
+        current = tiled_import_path(path.to_string_lossy().into_owned(), current)
+            .expect("Tiled fixture imports");
+
+        assert_eq!((current.width, current.height), (2, 1));
+        assert_eq!(current.tiles, vec![vec![7, 8]]);
+        assert_eq!(current.scripts[0].script, "msg {imported}");
+        assert_eq!(current.npcs[0].script, "@imported");
+        assert_eq!(current.wfc, expected_wfc);
+        assert_eq!(current.stamps, expected_stamps);
+    }
+
+    #[test]
+    fn capture_piece_allocates_max_id_plus_one() {
+        let mut map = GameMap {
+            width: 256,
+            height: 256,
+            tiles: vec![vec![0; 256]; 256],
+            npcs: Vec::new(),
+            scripts: Vec::new(),
+            collision: Vec::new(),
+            collision_types: Vec::new(),
+            encounters: Vec::new(),
+            encounter_zones: Vec::new(),
+            wfc: Some(wfc_test_project()),
+            stamps: Vec::new(),
+        };
+        let existing = map.wfc.as_ref().unwrap().pieces[0].clone();
+        map.wfc
+            .as_mut()
+            .unwrap()
+            .pieces
+            .push(WfcPiece { id: 19, ..existing });
+
+        let piece = capture_piece(
+            map,
+            TileRect {
+                x: 0,
+                y: 0,
+                w: 1,
+                h: 1,
+            },
+            CaptureOpts {
+                name: "captured".into(),
+                weight: 1.0,
+                limit: None,
+            },
+        )
+        .expect("piece capture");
+        assert_eq!(piece.id, 20);
+        assert_eq!(piece.name, "captured");
+    }
+
+    #[test]
+    fn wfc_generate_maps_contradiction_with_slot_coordinates() {
+        let project = WfcProject {
+            version: 1,
+            slot_w: 1,
+            slot_h: 1,
+            pieces: vec![WfcPiece {
+                id: 1,
+                name: "dead end".into(),
+                tw: 1,
+                th: 1,
+                tiles: "1".into(),
+                weight: 1.0,
+                limit: None,
+                edge_overrides: [
+                    EdgeSocket {
+                        side: Side::N,
+                        index: 0,
+                        label: 1,
+                    },
+                    EdgeSocket {
+                        side: Side::E,
+                        index: 0,
+                        label: 1,
+                    },
+                    EdgeSocket {
+                        side: Side::S,
+                        index: 0,
+                        label: 1,
+                    },
+                    EdgeSocket {
+                        side: Side::W,
+                        index: 0,
+                        label: 1,
+                    },
+                ]
+                .into(),
+                tags: Vec::new(),
+            }],
+            socket_labels: vec![
+                SocketLabel {
+                    id: 1,
+                    name: "one-way".into(),
+                    kind: SocketKind::Directed { partner: 2 },
+                },
+                SocketLabel {
+                    id: 2,
+                    name: "partner".into(),
+                    kind: SocketKind::Symmetric,
+                },
+            ],
+            recipes: vec![WfcRecipe {
+                id: 1,
+                name: "contradiction".into(),
+                piece_ids: vec![1],
+                size_w: 2,
+                size_h: 1,
+                seed: 1,
+                anchors: Vec::new(),
+                socket_compat: Vec::new(),
+            }],
+        };
+        let error = wfc_generate(project, 1, None, Some(1)).expect_err("must contradict");
+        assert!(error.contains("contradiction at cell"));
+        assert!(error.contains("(1, 0)"));
+    }
+
+    #[test]
+    fn wfc_generate_maps_memory_budget_with_both_byte_figures() {
+        let pieces: Vec<WfcPiece> = (0..257)
+            .map(|id| WfcPiece {
+                id,
+                name: format!("piece-{id}"),
+                tw: 1,
+                th: 1,
+                tiles: "0".into(),
+                weight: 1.0,
+                limit: None,
+                edge_overrides: Vec::new(),
+                tags: Vec::new(),
+            })
+            .collect();
+        let project = WfcProject {
+            version: 1,
+            slot_w: 1,
+            slot_h: 1,
+            pieces,
+            socket_labels: Vec::new(),
+            recipes: vec![WfcRecipe {
+                id: 1,
+                name: "too large".into(),
+                piece_ids: (0..257).collect(),
+                size_w: 256,
+                size_h: 256,
+                seed: 1,
+                anchors: Vec::new(),
+                socket_compat: Vec::new(),
+            }],
+        };
+        let error = wfc_generate(project, 1, None, Some(1)).expect_err("must exceed budget");
+        assert!(error.contains("memory budget exceeded"));
+        assert!(error.contains("need "));
+        assert!(error.contains(" cap "));
     }
 }

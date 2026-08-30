@@ -1,7 +1,9 @@
+use serde::{Deserialize, Serialize};
+
 use super::{CompiledRecipe, GenerateError};
 
 /// A generated tile hunk plus the chosen solver symbol for every slot.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Hunk {
     pub w: u32,
     pub h: u32,

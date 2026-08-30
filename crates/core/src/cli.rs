@@ -1,9 +1,18 @@
-use clap::Parser;
+use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
-#[command(name = "cgfx-tools", author, version, about)]
+#[command(
+    name = "cgfx-tools",
+    author,
+    version,
+    about,
+    subcommand_negates_reqs = true,
+    args_conflicts_with_subcommands = true
+)]
 pub struct Cli {
+    #[command(subcommand)]
+    pub command: Option<Command>,
     /// Project config file. Relative config values resolve from this file's directory.
     #[arg(
         long,
@@ -96,10 +105,104 @@ pub struct Cli {
     pub layout: Option<PathBuf>,
 }
 
+#[derive(Subcommand, Debug)]
+pub enum Command {
+    /// Generate WFC tile hunks from an authored map project.
+    #[command(subcommand)]
+    Wfc(WfcCommand),
+}
+
+#[derive(Subcommand, Debug)]
+pub enum WfcCommand {
+    /// Generate one hunk from a named or numeric recipe.
+    Generate(WfcGenerate),
+}
+
+#[derive(Args, Debug)]
+pub struct WfcGenerate {
+    /// Map project JSON containing its optional `wfc` project.
+    #[arg(long, value_name = "MAP")]
+    pub map: PathBuf,
+    /// Recipe ID or exact recipe name.
+    #[arg(long, value_name = "ID|NAME")]
+    pub recipe: String,
+    /// Override the recipe seed.
+    #[arg(long)]
+    pub seed: Option<u64>,
+    /// Override recipe dimensions in solver slots, as `WxH`.
+    #[arg(long, value_name = "WxH", value_parser = parse_slot_size)]
+    pub size: Option<(u32, u32)>,
+    /// Write a standalone generated-hunk JSON file.
+    #[arg(long, value_name = "FILE", conflicts_with = "in_place")]
+    pub out: Option<PathBuf>,
+    /// Append the generated hunk to the input map's stamp library.
+    #[arg(long, conflicts_with = "out")]
+    pub in_place: bool,
+    /// Print the solved slot grid and counts without writing files.
+    #[arg(long)]
+    pub dry_run: bool,
+    /// Name for an in-place stamp.
+    #[arg(long, value_name = "NAME", requires = "in_place")]
+    pub stamp_name: Option<String>,
+}
+
+fn parse_slot_size(value: &str) -> Result<(u32, u32), String> {
+    let Some((width, height)) = value.split_once('x') else {
+        return Err("size must use WxH, for example 4x3".to_string());
+    };
+    let width = width
+        .parse::<u32>()
+        .map_err(|_| "size width must be an unsigned integer".to_string())?;
+    let height = height
+        .parse::<u32>()
+        .map_err(|_| "size height must be an unsigned integer".to_string())?;
+    if width == 0 || height == 0 {
+        return Err("size dimensions must be greater than zero".to_string());
+    }
+    Ok((width, height))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use clap::CommandFactory;
+
+    #[test]
+    fn wfc_generate_accepts_all_generation_options() {
+        let cli = Cli::try_parse_from([
+            "cgfx-tools",
+            "wfc",
+            "generate",
+            "--map",
+            "map.json",
+            "--recipe",
+            "alternating",
+            "--seed",
+            "8",
+            "--size",
+            "5x4",
+            "--out",
+            "hunk.json",
+        ])
+        .expect("WFC generation invocation parses");
+        let Some(Command::Wfc(WfcCommand::Generate(args))) = cli.command else {
+            panic!("expected WFC generate command");
+        };
+        assert_eq!(args.map, PathBuf::from("map.json"));
+        assert_eq!(args.recipe, "alternating");
+        assert_eq!(args.seed, Some(8));
+        assert_eq!(args.size, Some((5, 4)));
+        assert_eq!(args.out, Some(PathBuf::from("hunk.json")));
+    }
+
+    #[test]
+    fn positional_legacy_invocation_still_parses() {
+        let cli = Cli::try_parse_from(["cgfx-tools", "input.json", "output"])
+            .expect("legacy invocation parses");
+        assert_eq!(cli.input, Some(PathBuf::from("input.json")));
+        assert_eq!(cli.output, Some(PathBuf::from("output")));
+        assert!(cli.command.is_none());
+    }
 
     #[test]
     fn project_option_accepts_explicit_config_path() {

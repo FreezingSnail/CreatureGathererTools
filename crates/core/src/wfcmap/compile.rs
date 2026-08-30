@@ -37,7 +37,7 @@ pub fn compile_recipe(
     compile_recipe_for_size(project, recipe, (recipe.size_w, recipe.size_h))
 }
 
-pub(crate) fn compile_recipe_for_size(
+pub fn compile_recipe_for_size(
     project: &WfcProject,
     recipe: &WfcRecipe,
     (size_w, size_h): (u32, u32),
@@ -83,6 +83,37 @@ pub(crate) fn compile_recipe_for_size(
                 })
         })
         .collect::<Result<_, _>>()?;
+
+    // Reject waves that cannot fit the solver's fixed memory budget before
+    // building the quadratic rule matrix. This keeps oversized authoring
+    // requests fast and reports the same byte figures as the solver.
+    let symbol_count = pieces.iter().try_fold(0usize, |count, piece| {
+        let piece_symbols = (piece.tw as usize)
+            .checked_div(project.slot_w as usize)
+            .and_then(|width| {
+                (piece.th as usize)
+                    .checked_div(project.slot_h as usize)
+                    .and_then(|height| width.checked_mul(height))
+            })?;
+        count.checked_add(piece_symbols)
+    });
+    let needed = symbol_count
+        .and_then(|symbols| {
+            (size_w as usize)
+                .checked_mul(size_h as usize)
+                .and_then(|cells| cells.checked_mul(symbols))
+        })
+        .and_then(|entries| entries.checked_mul(4))
+        .and_then(|entries| entries.checked_mul(std::mem::size_of::<u16>()))
+        .unwrap_or(usize::MAX);
+    let cap = cgfx_wfc::Params::seeded(0).max_bytes;
+    if needed > cap {
+        return Err(GenerateError::Solver(cgfx_wfc::WfcError::MemoryBudget {
+            needed,
+            cap,
+        }));
+    }
+
     for anchor in &recipe.anchors {
         if !recipe.piece_ids.contains(&anchor.piece_id) {
             return Err(GenerateError::Validation(vec![format!(
