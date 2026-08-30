@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 
 use super::rle;
+use super::slice::validate_edge_overrides;
 
 fn default_version() -> u32 {
     1
@@ -219,8 +220,6 @@ impl WfcProject {
                 None => errors.push(format!("piece {} tile dimensions overflow", piece.id)),
             }
 
-            let horizontal_slots = piece.tw.checked_div(self.slot_w).unwrap_or(0);
-            let vertical_slots = piece.th.checked_div(self.slot_h).unwrap_or(0);
             for edge in &piece.edge_overrides {
                 if !label_ids.contains(&edge.label) {
                     errors.push(format!(
@@ -228,16 +227,12 @@ impl WfcProject {
                         piece.id, edge.label
                     ));
                 }
-                let edge_len = match edge.side {
-                    Side::N | Side::S => horizontal_slots,
-                    Side::E | Side::W => vertical_slots,
-                };
-                if edge.index >= edge_len {
-                    errors.push(format!(
-                        "piece {} edge override index is out of range",
-                        piece.id
-                    ));
-                }
+            }
+            if let Err(error) = validate_edge_overrides(piece, self.slot_w, self.slot_h) {
+                errors.push(format!(
+                    "piece {} has invalid edge override: {error}",
+                    piece.id
+                ));
             }
         }
 
