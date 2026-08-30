@@ -86,6 +86,7 @@ beforeEach(() => {
 
 describe("App shell", () => {
   it("shows setup dialog when config is missing and opens editors after saving", async () => {
+    const consoleError = vi.spyOn(console, "error");
     mockInvoke.mockImplementation((cmd: string) => {
       if (cmd === "load_config") return Promise.reject(new Error("missing creature-tools.json"));
       if (cmd === "save_config") return Promise.resolve(null);
@@ -122,6 +123,8 @@ describe("App shell", () => {
     );
     expect(await screen.findByRole("tab", { name: "Map" })).toBeInTheDocument();
     expect(screen.getByTestId("tab-panel-map")).toBeInTheDocument();
+    expect(consoleError.mock.calls.flat().join(" ")).not.toContain("Maximum update depth exceeded");
+    consoleError.mockRestore();
   });
 
   it("shows a save failure error and keeps the setup dialog open", async () => {
@@ -157,19 +160,26 @@ describe("App shell", () => {
     const creaturePanel = screen.getByTestId("tab-panel-creature");
     const movePanel = screen.getByTestId("tab-panel-move");
     const layoutPanel = screen.getByTestId("tab-panel-layout");
+    const wfcPanel = screen.getByTestId("tab-panel-wfc");
 
     expect(mapPanel.getAttribute("role")).toBe("tabpanel");
     expect(creaturePanel.getAttribute("role")).toBe("tabpanel");
     expect(movePanel.getAttribute("role")).toBe("tabpanel");
+    expect(layoutPanel.getAttribute("role")).toBe("tabpanel");
+    expect(wfcPanel.getAttribute("role")).toBe("tabpanel");
 
     expect(mapPanel).toHaveAttribute("data-state", "active");
     expect(creaturePanel).toHaveAttribute("data-state", "inactive");
     expect(movePanel).toHaveAttribute("data-state", "inactive");
     expect(layoutPanel).toHaveAttribute("data-state", "inactive");
+    expect(wfcPanel).toHaveAttribute("data-state", "inactive");
 
-    for (const panel of [mapPanel, creaturePanel, movePanel, layoutPanel]) {
+    for (const panel of [mapPanel, creaturePanel, movePanel, layoutPanel, wfcPanel]) {
       expect(panel.className).toContain("data-[state=inactive]:hidden");
     }
+
+    await userEvent.setup().click(screen.getByRole("tab", { name: "WFC" }));
+    expect(wfcPanel).toHaveAttribute("data-state", "active");
   });
 
   it("opens the mounted Layout tab", async () => {

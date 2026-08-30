@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { MapEditor, type EditorDeps } from "./editor";
-import { CreatureEditor, LayoutView, MoveEditor } from "./components";
+import { CreatureEditor, LayoutView, MoveEditor, WfcTab } from "./components";
 import { SetupDialog } from "./SetupDialog";
 import { emptyMap } from "./state";
 import type { Config, GameMap, CompileResult, ParseResult } from "./types";
@@ -18,13 +18,14 @@ import { Card, CardContent } from "./components/ui/card";
 const readBytes = async (path: string): Promise<Uint8Array> =>
   new Uint8Array(await invoke<number[]>("read_file_bytes", { path }));
 
-type TabId = "map" | "creature" | "move" | "layout";
+type TabId = "map" | "creature" | "move" | "layout" | "wfc";
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "map", label: "Map" },
   { id: "creature", label: "Creature" },
   { id: "move", label: "Move" },
   { id: "layout", label: "Layout" },
+  { id: "wfc", label: "WFC" },
 ];
 
 type Phase = "checking" | "setup" | "editors";
@@ -139,6 +140,11 @@ function App() {
       setSetupError(String(e));
       setPhase("setup");
     }
+  };
+
+  const saveWfcMap = async (next: GameMap) => {
+    setMap(next);
+    await invoke("save_map", { map: next });
   };
 
   const saveMap = () => {
@@ -302,6 +308,24 @@ function App() {
             className="min-h-0 flex-1"
           >
             <LayoutView key={bootKey} />
+          </TabsContent>
+          <TabsContent
+            value="wfc"
+            forceMount
+            id="tab-panel-wfc"
+            data-testid="tab-panel-wfc"
+            aria-label="wfc"
+            className="min-h-0 flex-1"
+          >
+            {config && map && (
+              <WfcTab
+                key={bootKey}
+                config={config}
+                map={map}
+                onMapChange={setMap}
+                saveMap={saveWfcMap}
+              />
+            )}
           </TabsContent>
         </div>
       </Tabs>
