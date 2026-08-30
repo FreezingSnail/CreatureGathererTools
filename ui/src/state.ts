@@ -1,18 +1,25 @@
 // Pure editor state reducer: map data + tool settings + undo stack.
 // Mirrors the Go MapCanvas/MapEditor behavior (parity port, not redesign).
 
-import type { GameMap, ParseResult, CompileResult } from "./types";
+import type { GameMap, ParseResult, CompileResult, TileRect } from "./types";
 import {
   brushCells,
   blockCells,
   clampOffset,
+  clampRect,
   clampZoom,
 } from "./geometry";
 
 export type LayerType = "map" | "npc" | "script" | "collision" | "encounter";
 
 /** Canvas interaction tools. */
-export type EditorTool = "paint" | "pan";
+export type EditorTool = "paint" | "pan" | "select" | "paste";
+
+export interface TileClipboard {
+  w: number;
+  h: number;
+  tiles: number[];
+}
 
 export const LAYERS: LayerType[] = [
   "map",
@@ -42,6 +49,8 @@ export interface EditorState {
   // selections
   selectedNpc: number;
   selectedScript: number;
+  selection: TileRect | null;
+  clipboard: TileClipboard | null;
   /** Script layer: id currently open in the inline editor (-1 = closed). */
   editingScript: number;
   // view
@@ -126,6 +135,8 @@ export function initialState(): EditorState {
     activeEncounterZone: 0,
     selectedNpc: EMPTY_SELECTION,
     selectedScript: EMPTY_SELECTION,
+    selection: null,
+    clipboard: null,
     editingScript: EMPTY_SELECTION,
     zoom: 2,
     offsetX: 0,
@@ -146,7 +157,13 @@ export function initialState(): EditorState {
 
 export type Action =
   | { type: "SET_MAP"; map: GameMap }
+  | { type: "UPDATE_MAP"; map: GameMap }
   | { type: "SET_TOOL"; tool: EditorTool }
+  | { type: "SET_SELECTION"; rect: TileRect | null }
+  | { type: "CLEAR_SELECTION" }
+  | { type: "COPY_SELECTION" }
+  | { type: "SET_CLIPBOARD"; clipboard: TileClipboard | null }
+  | { type: "PASTE_AT"; x: number; y: number }
   | { type: "SET_LAYER"; layer: LayerType }
   | { type: "SET_ACTIVE_TILE"; tile: number }
   | { type: "SET_ACTIVE_BLOCK"; block: number[]; w: number; h: number }
@@ -199,8 +216,66 @@ export function reducer(state: EditorState, action: Action): EditorState {
     case "SET_MAP":
       return { ...initialState(), map: normalizeMap(action.map) };
 
+    case "UPDATE_MAP":
+      return { ...state, map: normalizeMap(action.map) };
+
     case "SET_TOOL":
       return { ...state, tool: action.tool };
+
+    case "SET_SELECTION": {
+      if (!action.rect) {
+        return { ...state, selection: null };
+      }
+      return {
+        ...state,
+        selection: clampRect(action.rect, state.map.width, state.map.height),
+      };
+    }
+
+    case "CLEAR_SELECTION":
+      return { ...state, selection: null };
+
+    case "SET_CLIPBOARD":
+      return { ...state, clipboard: action.clipboard };
+
+    case "COPY_SELECTION": {
+      const rect = state.selection;
+      if (!rect) {
+        return state;
+      }
+      const tiles: number[] = [];
+      for (let row = rect.y; row < rect.y + rect.h; row += 1) {
+        for (let col = rect.x; col < rect.x + rect.w; col += 1) {
+          tiles.push(state.map.tiles[row]?.[col] ?? 0);
+        }
+      }
+      return { ...state, clipboard: { w: rect.w, h: rect.h, tiles } };
+    }
+
+    case "PASTE_AT": {
+      const clip = state.clipboard;
+      if (!clip || clip.w <= 0 || clip.h <= 0 || clip.tiles.length < clip.w * clip.h) {
+        return state;
+      }
+      const tiles = state.map.tiles.map((row) => [...row]);
+      let touched = false;
+      for (let row = 0; row < clip.h; row += 1) {
+        for (let col = 0; col < clip.w; col += 1) {
+          const mapCol = action.x + col;
+          const mapRow = action.y + row;
+          if (!inBounds(state.map, mapRow, mapCol)) {
+            continue;
+          }
+          touched = true;
+          const value = clip.tiles[row * clip.w + col];
+          tiles[mapRow][mapCol] = value;
+        }
+      }
+      if (!touched) {
+        return state;
+      }
+      return { ...pushUndo(state), map: { ...state.map, tiles } };
+    }
 
     case "SET_LAYER":
       return { ...state, layer: action.layer };

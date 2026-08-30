@@ -63,7 +63,7 @@ export interface WfcPiece {
   th: number;
   tiles: string;
   weight: number;
-  limit?: number;
+  limit?: number | null;
   edge_overrides: EdgeSocket[];
   tags: string[];
 }
@@ -107,7 +107,7 @@ export interface Stamp {
   w: number;
   h: number;
   tiles: string;
-  origin?: StampOrigin;
+  origin?: StampOrigin | null;
 }
 
 export interface Hunk {
@@ -133,7 +133,7 @@ export interface TileRect {
 export interface CaptureOpts {
   name: string;
   weight: number;
-  limit?: number;
+  limit?: number | null;
 }
 
 export interface GameMap {

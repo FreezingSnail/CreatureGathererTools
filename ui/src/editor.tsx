@@ -12,7 +12,8 @@ import {
   type MutableRefObject,
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { Config, GameMap, ParseResult, CompileResult } from "./types";
+import type { Config, GameMap, ParseResult, CompileResult, TileRect, WfcProject, WfcPiece } from "./types";
+import { StampLibrary } from "./components/StampLibrary";
 import {
   initialState,
   reducer,
@@ -26,6 +27,7 @@ import {
   loadTilesetFromBytes,
   emptyTileset,
 } from "./tileset";
+import { clampRect } from "./geometry";
 import { MapCanvas } from "./canvas";
 import { Palette } from "./palette";
 import { ScriptPane } from "./scriptPane";
@@ -41,6 +43,18 @@ export interface EditorDeps {
   saveMap: (map: GameMap) => Promise<void>;
   compileMap: () => Promise<CompileResult>;
   parseScript: (src: string) => Promise<ParseResult>;
+}
+
+export function defaultWfcProject(): WfcProject {
+  return { version: 1, slot_w: 2, slot_h: 2, pieces: [], socket_labels: [], recipes: [] };
+}
+
+function snappedCaptureRect(rect: TileRect, project: WfcProject): TileRect | null {
+  const x = Math.floor(rect.x / project.slot_w) * project.slot_w;
+  const y = Math.floor(rect.y / project.slot_h) * project.slot_h;
+  const endX = Math.ceil((rect.x + rect.w) / project.slot_w) * project.slot_w;
+  const endY = Math.ceil((rect.y + rect.h) / project.slot_h) * project.slot_h;
+  return clampRect({ x, y, w: endX - x, h: endY - y }, 256, 256);
 }
 
 interface EditorProps {
@@ -163,6 +177,12 @@ export function MapEditor({
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
         e.preventDefault();
         dispatch({ type: "UNDO" });
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
+        e.preventDefault();
+        dispatch({ type: "COPY_SELECTION" });
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") {
+        e.preventDefault();
+        dispatch({ type: "SET_TOOL", tool: "paste" });
       } else if ((e.ctrlKey || e.metaKey) && e.key === "=") {
         e.preventDefault();
         dispatch({ type: "SET_ZOOM", zoom: state.zoom * 1.5 });
@@ -175,6 +195,10 @@ export function MapEditor({
         dispatch({ type: "SET_TOOL", tool: "paint" });
       } else if (e.key.toLowerCase() === "g") {
         dispatch({ type: "SET_TOOL", tool: "pan" });
+      } else if (e.key.toLowerCase() === "s") {
+        dispatch({ type: "SET_TOOL", tool: "select" });
+      } else if (e.key.toLowerCase() === "v") {
+        dispatch({ type: "SET_TOOL", tool: "paste" });
       } else if (e.key === "Escape") {
         dispatch({ type: "OPEN_SCRIPT", id: -1 });
       }
@@ -223,6 +247,35 @@ export function MapEditor({
       setStatus(`compile error: ${String(err)}`);
     }
   }, [deps, setStatus]);
+
+  const capturePiece = useCallback(async () => {
+    const rect = state.selection;
+    if (!rect) {
+      setStatus("select tiles first");
+      return;
+    }
+    const name = window.prompt("Piece name", "captured piece")?.trim();
+    if (!name) return;
+    const project = state.map.wfc ?? defaultWfcProject();
+    if (project.slot_w <= 0 || project.slot_h <= 0) {
+      setStatus("capture failed: invalid WFC slot size");
+      return;
+    }
+    try {
+      const piece = await invoke<WfcPiece>("capture_piece", {
+        map: { ...state.map, wfc: project },
+        rect,
+        opts: { name, weight: 1, limit: null },
+      });
+      const nextProject = { ...project, pieces: [...project.pieces, piece] };
+      dispatch({ type: "UPDATE_MAP", map: { ...state.map, wfc: nextProject } });
+      const snapped = snappedCaptureRect(rect, project);
+      if (snapped) dispatch({ type: "SET_SELECTION", rect: snapped });
+      setStatus(`captured ${name} (${piece.tw}×${piece.th})`);
+    } catch (err) {
+      setStatus(`capture failed: ${String(err)}`);
+    }
+  }, [state.map, state.selection, setStatus]);
 
   const selectedNpcs = state.selectedNpc >= 0 ? [state.map.npcs[state.selectedNpc]] : [];
   const editingScripts = state.editingScript >= 0 ? [state.map.scripts[state.editingScript]] : [];
@@ -310,18 +363,27 @@ export function MapEditor({
         </div>
         <div style={{ flex: 1, overflow: "auto", padding: 4 }}>
           {paletteTab === "map" && (
-            <Palette
-              tiles={mapTiles.tiles}
-              perRow={mapTiles.perRow}
-              tilePx={paletteTilePx(mapTiles.perRow)}
-              sensitivity={zoomSens}
-              selected={state.activeBlock}
-              onSelectBlock={(block, w, h) => {
-                dispatch({ type: "SET_TOOL", tool: "paint" });
-                dispatch({ type: "SET_ACTIVE_BLOCK", block, w, h });
-              }}
-              emptyLabel="No map tileset loaded (set map_tileset_png)"
-            />
+            <>
+              <Palette
+                tiles={mapTiles.tiles}
+                perRow={mapTiles.perRow}
+                tilePx={paletteTilePx(mapTiles.perRow)}
+                sensitivity={zoomSens}
+                selected={state.activeBlock}
+                onSelectBlock={(block, w, h) => {
+                  dispatch({ type: "SET_TOOL", tool: "paint" });
+                  dispatch({ type: "SET_ACTIVE_BLOCK", block, w, h });
+                }}
+                emptyLabel="No map tileset loaded (set map_tileset_png)"
+              />
+              <StampLibrary
+                map={state.map}
+                tiles={mapTiles.tiles}
+                selection={state.selection}
+                onMapChange={(next) => dispatch({ type: "UPDATE_MAP", map: next })}
+                onSetClipboard={(clipboard) => dispatch({ type: "SET_CLIPBOARD", clipboard })}
+              />
+            </>
           )}
           {paletteTab === "npc" && (
             <Palette
@@ -471,7 +533,7 @@ export function MapEditor({
           }}
         >
           <span style={{ fontSize: 12 }}>Tool:</span>
-          {(["paint", "pan"] as EditorTool[]).map((t) => (
+          {(["paint", "pan", "select", "paste"] as EditorTool[]).map((t) => (
             <Button
               key={t}
               type="button"
@@ -521,6 +583,33 @@ export function MapEditor({
             onClick={() => dispatch({ type: "UNDO" })}
           >
             undo
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={!state.selection}
+            onClick={() => dispatch({ type: "COPY_SELECTION" })}
+          >
+            Copy
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={!state.selection}
+            onClick={() => dispatch({ type: "CLEAR_SELECTION" })}
+          >
+            Clear selection
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={!state.selection}
+            onClick={capturePiece}
+          >
+            Capture as piece
           </Button>
           <Button
             type="button"
@@ -575,6 +664,8 @@ export function MapEditor({
             activeBlock={state.activeBlock}
             blockW={state.blockW}
             blockH={state.blockH}
+            selection={state.selection}
+            clipboard={state.clipboard}
             selectedNpc={state.selectedNpc}
             selectedScript={state.selectedScript}
             showChunks={state.showChunks}
@@ -591,6 +682,8 @@ export function MapEditor({
             onPaintBlock={(col, row) => dispatch({ type: "PAINT_BLOCK", col, row })}
             onPaintCollision={(col, row) => dispatch({ type: "PAINT_COLLISION", col, row })}
             onPaintEncounter={(col, row) => dispatch({ type: "PAINT_ENCOUNTER", col, row })}
+            onPasteAt={(x, y) => dispatch({ type: "PASTE_AT", x, y })}
+            onSetSelection={(rect) => dispatch({ type: "SET_SELECTION", rect })}
             onClickNpc={(col, row) => dispatch({ type: "CLICK_NPC", col, row })}
             onClickScript={(col, row) => dispatch({ type: "CLICK_SCRIPT", col, row })}
             onOpenScript={(id) => dispatch({ type: "OPEN_SCRIPT", id })}

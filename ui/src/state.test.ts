@@ -247,3 +247,40 @@ describe("normalizeMap", () => {
     expect(m.tiles[0]).toHaveLength(5);
   });
 });
+
+
+describe("selection and clipboard", () => {
+  it("clamps selection to map bounds", () => {
+    let s = initialState();
+    s = reducer(s, { type: "SET_MAP", map: emptyMap(4, 3) });
+    s = reducer(s, { type: "SET_SELECTION", rect: { x: -2, y: 1, w: 9, h: 9 } });
+    expect(s.selection).toEqual({ x: 0, y: 1, w: 4, h: 2 });
+  });
+
+  it("copies selected tiles row-major", () => {
+    let s = initialState();
+    const map = emptyMap(4, 3);
+    map.tiles = [[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12]];
+    s = reducer(s, { type: "SET_MAP", map });
+    s = reducer(s, { type: "SET_SELECTION", rect: { x: 1, y: 0, w: 2, h: 2 } });
+    s = reducer(s, { type: "COPY_SELECTION" });
+    expect(s.clipboard).toEqual({ w: 2, h: 2, tiles: [2, 3, 6, 7] });
+  });
+
+  it("clips paste, pushes undo, restores, and touches only map tiles", () => {
+    let s = initialState();
+    const map = emptyMap(3, 3);
+    map.collision[0][0] = 8;
+    map.npcs = [{ id: 1, x: 1, y: 1, sprite_id: 2, script: "keep" }];
+    s = reducer(s, { type: "SET_MAP", map });
+    s = reducer(s, { type: "SET_CLIPBOARD", clipboard: { w: 2, h: 2, tiles: [4, 5, 6, 7] } });
+    s = reducer(s, { type: "PASTE_AT", x: 2, y: 2 });
+    expect(s.map.tiles[2][2]).toBe(4);
+    expect(s.map.tiles[2][1]).toBe(0);
+    expect(s.undoStack).toHaveLength(1);
+    expect(s.map.collision[0][0]).toBe(8);
+    expect(s.map.npcs[0].script).toBe("keep");
+    s = reducer(s, { type: "UNDO" });
+    expect(s.map.tiles).toEqual(makeGrid(3, 3, 0));
+  });
+});

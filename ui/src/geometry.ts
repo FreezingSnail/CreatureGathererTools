@@ -46,6 +46,26 @@ export function tileToPixel(
   };
 }
 
+/** Inclusive drag endpoints -> a positive row-major tile rectangle. */
+export function rectFromPoints(a: TilePos, b: TilePos): { x: number; y: number; w: number; h: number } {
+  const x = Math.min(a.col, b.col);
+  const y = Math.min(a.row, b.row);
+  return { x, y, w: Math.abs(a.col - b.col) + 1, h: Math.abs(a.row - b.row) + 1 };
+}
+
+/** Clamp a rectangle to a map, preserving a non-empty intersection. */
+export function clampRect(
+  rect: { x: number; y: number; w: number; h: number },
+  width: number,
+  height: number
+): { x: number; y: number; w: number; h: number } | null {
+  const x = Math.max(0, Math.min(width, rect.x));
+  const y = Math.max(0, Math.min(height, rect.y));
+  const endX = Math.max(x, Math.min(width, rect.x + rect.w));
+  const endY = Math.max(y, Math.min(height, rect.y + rect.h));
+  return endX > x && endY > y ? { x, y, w: endX - x, h: endY - y } : null;
+}
+
 /** Go parity: pan offset clamps to >= 0. */
 export function clampOffset(offsetX: number, offsetY: number): TilePos {
   return { col: Math.max(0, offsetX), row: Math.max(0, offsetY) };

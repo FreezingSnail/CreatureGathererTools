@@ -3,14 +3,16 @@
 // selection outlines, coordinate labels.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { GameMap } from "./types";
-import type { LayerType, EditorTool } from "./state";
+import type { GameMap, TileRect } from "./types";
+import type { LayerType, EditorTool, TileClipboard } from "./state";
 import {
   TILE_SIZE,
   MARGIN_X,
   MARGIN_Y,
   CHUNK_W,
   CHUNK_H,
+  clampRect,
+  rectFromPoints,
   screenToTile,
   tileToPixel,
   parseHexColor,
@@ -29,6 +31,8 @@ export interface MapCanvasProps {
   activeBlock: number[];
   blockW: number;
   blockH: number;
+  selection?: TileRect | null;
+  clipboard?: TileClipboard | null;
   selectedNpc: number;
   selectedScript: number;
   showChunks: boolean;
@@ -43,6 +47,8 @@ export interface MapCanvasProps {
   onPaintBlock: (col: number, row: number) => void;
   onPaintCollision: (col: number, row: number) => void;
   onPaintEncounter: (col: number, row: number) => void;
+  onPasteAt?: (x: number, y: number) => void;
+  onSetSelection?: (rect: TileRect | null) => void;
   onClickNpc: (col: number, row: number) => void;
   onClickScript: (col: number, row: number) => void;
   onOpenScript: (id: number) => void;
@@ -128,6 +134,9 @@ export function MapCanvas(props: MapCanvasProps) {
     row: 0,
     visible: false,
   });
+  const [dragSelection, setDragSelection] = useState<TileRect | null>(null);
+  const dragSelectionRef = useRef<TileRect | null>(null);
+  dragSelectionRef.current = dragSelection;
 
   // Latest props/ghost via refs so the resize path can redraw without
   // re-registering observers on every state change.
@@ -145,7 +154,10 @@ export function MapCanvas(props: MapCanvasProps) {
     if (!ctx) {
       return; // jsdom-safe
     }
-    drawFrame(ctx, canvas.width, canvas.height, propsRef.current, ghostRef.current);
+    drawFrame(ctx, canvas.width, canvas.height, propsRef.current, {
+      ...ghostRef.current,
+      selection: dragSelectionRef.current,
+    });
   }, []);
 
   // canvas sizing + draw. Setting width/height wipes the buffer, so redraw or
@@ -214,6 +226,8 @@ export function MapCanvas(props: MapCanvasProps) {
     props.activeBlock,
     props.blockW,
     props.blockH,
+    props.selection,
+    props.clipboard,
     props.selectedNpc,
     props.selectedScript,
     props.showChunks,
@@ -223,6 +237,7 @@ export function MapCanvas(props: MapCanvasProps) {
     props.showNpcOverlay,
     props.showScriptOverlay,
     ghost,
+    dragSelection,
   ]);
 
   const viewport = {
@@ -236,6 +251,7 @@ export function MapCanvas(props: MapCanvasProps) {
     ox: number;
     oy: number;
     pending: { col: number; row: number } | null;
+    selectionStart: { col: number; row: number } | null;
   } | null>(null);
   const panningRef = useRef(false);
 
@@ -258,8 +274,16 @@ export function MapCanvas(props: MapCanvasProps) {
     }
   };
 
-  /** Execute a click after mouseup if the pointer didn't travel (drag = pan). */
   const clickAt = (col: number, row: number) => {
+    switch (props.tool) {
+      case "paste":
+        props.onPasteAt?.(col, row);
+        return;
+      case "select":
+        return;
+      default:
+        break;
+    }
     switch (props.layer) {
       case "map":
       case "collision":
@@ -294,12 +318,37 @@ export function MapCanvas(props: MapCanvasProps) {
     if (middlePan || altPan || panTool) {
       e.preventDefault();
       panningRef.current = true;
-      startRef.current = { x, y, ox: props.offsetX, oy: props.offsetY, pending: null };
+      startRef.current = {
+        x,
+        y,
+        ox: props.offsetX,
+        oy: props.offsetY,
+        pending: null,
+        selectionStart: null,
+      };
       return;
     }
-    // left click: defer action to mouseup so a drag can pan instead
     const { col, row } = toTile(x, y);
-    startRef.current = { x, y, ox: props.offsetX, oy: props.offsetY, pending: { col, row } };
+    if (props.tool === "select") {
+      startRef.current = {
+        x,
+        y,
+        ox: props.offsetX,
+        oy: props.offsetY,
+        pending: null,
+        selectionStart: { col, row },
+      };
+      setDragSelection(clampRect({ x: col, y: row, w: 1, h: 1 }, props.map.width, props.map.height));
+      return;
+    }
+    startRef.current = {
+      x,
+      y,
+      ox: props.offsetX,
+      oy: props.offsetY,
+      pending: { col, row },
+      selectionStart: null,
+    };
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
@@ -311,6 +360,16 @@ export function MapCanvas(props: MapCanvasProps) {
     const y = e.clientY - rect.top;
     const { col, row } = toTile(x, y);
     setGhost({ col, row, visible: true });
+
+    if (startRef.current?.selectionStart && props.tool === "select") {
+      const next = clampRect(
+        rectFromPoints(startRef.current.selectionStart, { col, row }),
+        props.map.width,
+        props.map.height
+      );
+      setDragSelection(next);
+      return;
+    }
 
     if (panningRef.current && startRef.current) {
       const tile = TILE_SIZE * props.zoom;
@@ -332,7 +391,10 @@ export function MapCanvas(props: MapCanvasProps) {
 
   const endDrag = () => {
     const start = startRef.current;
-    if (start?.pending && !panningRef.current) {
+    if (start?.selectionStart && props.tool === "select") {
+      props.onSetSelection?.(dragSelectionRef.current);
+      setDragSelection(null);
+    } else if (start?.pending && !panningRef.current) {
       clickAt(start.pending.col, start.pending.row);
     }
     panningRef.current = false;
@@ -431,7 +493,8 @@ export function MapCanvas(props: MapCanvasProps) {
         position: "relative",
         overflow: "hidden",
         background: "#1a1a1a",
-        cursor: props.tool === "pan" ? "grab" : "crosshair",
+        cursor:
+          props.tool === "pan" ? "grab" : props.tool === "paste" ? "copy" : "crosshair",
       }}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
@@ -462,7 +525,7 @@ export function drawFrame(
   w: number,
   h: number,
   p: MapCanvasProps,
-  ghost: { col: number; row: number; visible: boolean }
+  ghost: { col: number; row: number; visible: boolean; selection?: TileRect | null }
 ) {
   ctx.imageSmoothingEnabled = true;
   ctx.clearRect(0, 0, w, h);
@@ -602,17 +665,20 @@ export function drawFrame(
     }
   }
 
-  // ghost block preview
-  if (ghost.visible && p.activeBlock.length > 0) {
-    for (let dr = 0; dr < p.blockH; dr++) {
-      for (let dc = 0; dc < p.blockW; dc++) {
+  // ghost block/paste preview
+  const ghostTiles = p.tool === "paste" ? p.clipboard?.tiles ?? [] : p.activeBlock;
+  const ghostW = p.tool === "paste" ? p.clipboard?.w ?? 0 : p.blockW;
+  const ghostH = p.tool === "paste" ? p.clipboard?.h ?? 0 : p.blockH;
+  if (ghost.visible && ghostTiles.length > 0) {
+    for (let dr = 0; dr < ghostH; dr++) {
+      for (let dc = 0; dc < ghostW; dc++) {
         const mapCol = ghost.col + dc;
         const mapRow = ghost.row + dr;
         if (mapCol < 0 || mapCol >= m.width || mapRow < 0 || mapRow >= m.height) {
           continue;
         }
         const { px, py } = tileToPixel(mapCol, mapRow, p.offsetX, p.offsetY, p.zoom);
-        const tileID = p.activeBlock[dr * p.blockW + dc];
+        const tileID = ghostTiles[dr * ghostW + dc];
         if (tileID !== undefined && tileID < p.tiles.length && p.tiles[tileID]) {
           ctx.globalAlpha = 0.5;
           ctx.drawImage(p.tiles[tileID], px, py, tileW, tileH);
@@ -651,6 +717,21 @@ export function drawFrame(
     ctx.lineTo(maxGridX, y);
   }
   ctx.stroke();
+
+  const selection = ghost.selection ?? p.selection;
+  if (selection) {
+    const { px, py } = tileToPixel(selection.x, selection.y, p.offsetX, p.offsetY, p.zoom);
+    const sw = selection.w * tileW;
+    const sh = selection.h * tileH;
+    ctx.fillStyle = "rgba(80, 190, 255, 0.16)";
+    ctx.fillRect(px, py, sw, sh);
+    ctx.strokeStyle = "#55d8ff";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(px + 1, py + 1, sw - 2, sh - 2);
+    ctx.fillStyle = "#d8f5ff";
+    ctx.font = "12px system-ui";
+    ctx.fillText(`${selection.x},${selection.y} ${selection.w}×${selection.h}`, px + 3, py + 14);
+  }
 
   // chunk overlay
   if (p.showChunks) {
