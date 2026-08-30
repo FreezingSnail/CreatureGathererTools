@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "slot_w": 1,
+  "slot_h": 1,
+  "pieces": [
+    {
+      "id": 1,
+      "name": "one",
+      "tw": 1,
+      "th": 1,
+      "tiles": "1",
+      "weight": 1.0,
+      "edge_overrides": [
+        { "side": "n", "index": 0, "label": 1 },
+        { "side": "e", "index": 0, "label": 1 },
+        { "side": "s", "index": 0, "label": 1 },
+        { "side": "w", "index": 0, "label": 1 }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "two",
+      "tw": 1,
+      "th": 1,
+      "tiles": "2",
+      "weight": 1.0,
+      "edge_overrides": [
+        { "side": "n", "index": 0, "label": 2 },
+        { "side": "e", "index": 0, "label": 2 },
+        { "side": "s", "index": 0, "label": 2 },
+        { "side": "w", "index": 0, "label": 2 }
+      ]
+    }
+  ],
+  "socket_labels": [
+    { "id": 1, "name": "one-side", "kind": { "directed": { "partner": 2 } } },
+    { "id": 2, "name": "two-side", "kind": { "directed": { "partner": 1 } } }
+  ],
+  "recipes": [
+    {
+      "id": 1,
+      "name": "alternating",
+      "piece_ids": [1, 2],
+      "size_w": 4,
+      "size_h": 3,
+      "seed": 7,
+      "anchors": [],
+      "socket_compat": []
+    }
+  ]
+}

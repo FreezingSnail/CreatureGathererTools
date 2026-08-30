@@ -521,6 +521,7 @@ name = "cgfx-core"
 version = "0.2.0"
 dependencies = [
  "anyhow",
+ "cgfx-wfc",
  "chrono",
  "clap",
  "png 0.17.16",

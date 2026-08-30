@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 use super::rle;
 use super::slice::validate_edge_overrides;
 
+pub type ValidationIssue = String;
+
 fn default_version() -> u32 {
     1
 }
