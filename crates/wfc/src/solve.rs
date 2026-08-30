@@ -27,6 +27,20 @@ pub struct Preset {
     pub allowed: Vec<u32>,
 }
 
+/// Domain-free observation policy. `decided` contains the symbols fixed by
+/// earlier observations, in row-major cell order; undecided cells are `None`.
+pub trait ObservationFilter {
+    fn allows(&self, cell: usize, symbol: u32, decided: &[Option<u32>]) -> bool;
+}
+
+struct AllowAll;
+
+impl ObservationFilter for AllowAll {
+    fn allows(&self, _cell: usize, _symbol: u32, _decided: &[Option<u32>]) -> bool {
+        true
+    }
+}
+
 /// Failure while validating or solving a wave.
 #[derive(Debug, Clone, PartialEq)]
 pub enum WfcError {
@@ -52,6 +66,11 @@ pub enum WfcError {
     BudgetExceeded {
         steps: u64,
     },
+    ObservationContradiction {
+        cell: usize,
+        x: u32,
+        y: u32,
+    },
 }
 
 impl std::fmt::Display for WfcError {
@@ -76,6 +95,9 @@ impl std::fmt::Display for WfcError {
                 "contradiction at cell {cell} ({x}, {y}) after {attempts} attempts"
             ),
             Self::BudgetExceeded { steps } => write!(f, "step budget exceeded at step {steps}"),
+            Self::ObservationContradiction { cell, x, y } => {
+                write!(f, "observation filter rejected cell {cell} ({x}, {y})")
+            }
         }
     }
 }
@@ -95,6 +117,17 @@ pub fn solve(
     rules: &Rules,
     presets: &[Preset],
     params: &Params,
+) -> Result<Vec<u32>, WfcError> {
+    solve_with_filter(grid, rules, presets, params, &AllowAll)
+}
+
+/// Solve with an optional domain-free policy applied at each observation.
+pub fn solve_with_filter<F: ObservationFilter + ?Sized>(
+    grid: Grid,
+    rules: &Rules,
+    presets: &[Preset],
+    params: &Params,
+    filter: &F,
 ) -> Result<Vec<u32>, WfcError> {
     rules.validate()?;
     let cells = grid.cells();
@@ -140,13 +173,17 @@ pub fn solve(
     // one attempt preserves the typed contradiction result and avoids a panic.
     let attempts = params.max_attempts.max(1);
     let mut last_contradiction = None;
+    let mut last_filter_contradiction = None;
     for attempt in 0..attempts {
         let mut state = State::new(grid, rules);
         let mut rng = Rng::new(params.seed.wrapping_add(attempt as u64));
         let result = state.initialize(rules, presets, grid, params.budget_steps, &mut rng);
         match result {
-            Ok(()) => match state.observe(rules, grid, params.budget_steps, &mut rng) {
+            Ok(()) => match state.observe(rules, grid, params.budget_steps, &mut rng, filter) {
                 Ok(output) => return Ok(output),
+                Err(WfcError::ObservationContradiction { cell, .. }) => {
+                    last_filter_contradiction = Some(cell);
+                }
                 Err(WfcError::Contradiction { cell, .. }) => {
                     last_contradiction = Some(cell);
                 }
@@ -159,6 +196,10 @@ pub fn solve(
         }
     }
 
+    if let Some(cell) = last_filter_contradiction {
+        let (x, y) = grid.coords(cell);
+        return Err(WfcError::ObservationContradiction { cell, x, y });
+    }
     let cell = last_contradiction.map_or(0, |cell| cell);
     let (x, y) = grid.coords(cell);
     Err(WfcError::Contradiction {
@@ -303,15 +344,47 @@ impl State {
         Ok(())
     }
 
-    fn observe(
+    fn observe<F: ObservationFilter + ?Sized>(
         &mut self,
         rules: &Rules,
         grid: Grid,
         budget: u64,
         rng: &mut Rng,
+        filter: &F,
     ) -> Result<Vec<u32>, WfcError> {
         loop {
+            let decided: Vec<Option<u32>> = (0..grid.cells())
+                .map(|candidate_cell| {
+                    if self.sums_of_ones[candidate_cell] != 1 {
+                        return None;
+                    }
+                    (0..rules.symbol_count() as u32).find(|&symbol| {
+                        self.wave[candidate_cell * rules.symbol_count() + symbol as usize]
+                    })
+                })
+                .collect();
             let mut best = None;
+            let mut filter_changed = false;
+            for candidate_cell in 0..grid.cells() {
+                if self.sums_of_ones[candidate_cell] <= 1 {
+                    continue;
+                }
+                for symbol in 0..rules.symbol_count() as u32 {
+                    if self.wave[candidate_cell * rules.symbol_count() + symbol as usize]
+                        && !filter.allows(candidate_cell, symbol, &decided)
+                    {
+                        self.ban(candidate_cell, symbol, rules);
+                        filter_changed = true;
+                    }
+                }
+            }
+            if let Err(error) = self.propagate(rules, grid, budget, rng) {
+                if filter_changed && let WfcError::Contradiction { cell, .. } = error {
+                    let (x, y) = grid.coords(cell);
+                    return Err(WfcError::ObservationContradiction { cell, x, y });
+                }
+                return Err(error);
+            }
             for cell in 0..grid.cells() {
                 if self.sums_of_ones[cell] > 1 {
                     let key = self.entropies[cell] + 1e-6 * rng.next_f64();
@@ -324,17 +397,26 @@ impl State {
                 return Ok(self.output(rules));
             };
 
-            let mut target = rng.next_f64() * self.sums_of_weights[cell];
+            let allowed: Vec<(u32, f64)> = (0..rules.symbol_count() as u32)
+                .filter(|&symbol| {
+                    self.wave[cell * rules.symbol_count() + symbol as usize]
+                        && filter.allows(cell, symbol, &decided)
+                })
+                .map(|symbol| (symbol, rules.weights()[symbol as usize]))
+                .collect();
+            let allowed_weight: f64 = allowed.iter().map(|(_, weight)| weight).sum();
+            if allowed.is_empty() || allowed_weight <= 0.0 {
+                let (x, y) = grid.coords(cell);
+                return Err(WfcError::ObservationContradiction { cell, x, y });
+            }
+            let mut target = rng.next_f64() * allowed_weight;
             let mut chosen = None;
-            for symbol in 0..rules.symbol_count() {
-                if self.wave[cell * rules.symbol_count() + symbol] {
-                    let weight = rules.weights()[symbol];
-                    if target < weight {
-                        chosen = Some(symbol as u32);
-                        break;
-                    }
-                    target -= weight;
+            for (symbol, weight) in allowed {
+                if target < weight {
+                    chosen = Some(symbol);
+                    break;
                 }
+                target -= weight;
             }
             let Some(chosen) = chosen else {
                 // Positive finite weights and a non-empty domain make this

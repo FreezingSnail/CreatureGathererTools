@@ -1,7 +1,7 @@
 use creaturevm::model::GameMap;
 use creaturevm::wfcmap::{
-    Anchor, EdgeSocket, RleError, Side, SocketKind, SocketLabel, Stamp, StampOrigin, WfcPiece,
-    WfcProject, WfcRecipe, decode, encode,
+    Anchor, EdgeSocket, RleError, RuleSpec, Side, SocketKind, SocketLabel, Stamp, StampOrigin,
+    WfcPiece, WfcProject, WfcRecipe, decode, encode,
 };
 
 fn map_without_wfc() -> GameMap {
@@ -82,6 +82,7 @@ fn populated_wfc_project_and_stamp_round_trip_through_json() {
                 sy: 0,
             }],
             socket_compat: vec![(7, 8)],
+            rules: Vec::new(),
         }],
     };
     project.validate().expect("fixture is valid");
@@ -216,6 +217,7 @@ fn validate_reports_all_schema_problem_classes_together() {
                     },
                 ],
                 socket_compat: Vec::new(),
+                rules: Vec::new(),
             },
             WfcRecipe {
                 id: 7,
@@ -226,6 +228,7 @@ fn validate_reports_all_schema_problem_classes_together() {
                 seed: 0,
                 anchors: Vec::new(),
                 socket_compat: Vec::new(),
+                rules: Vec::new(),
             },
         ],
     };
@@ -255,4 +258,65 @@ fn validate_reports_all_schema_problem_classes_together() {
         errors.len() >= 15,
         "expected aggregate validation errors: {text}"
     );
+}
+
+#[test]
+fn recipe_rules_default_when_omitted_and_round_trip_tagged() {
+    let recipe: WfcRecipe =
+        serde_json::from_str(r#"{"id": 1, "piece_ids": [7], "size_w": 2, "size_h": 2}"#)
+            .expect("legacy recipe parses");
+    assert!(recipe.rules.is_empty());
+    let json = serde_json::to_value(WfcRecipe {
+        rules: vec![RuleSpec::Count {
+            piece_id: 7,
+            min: Some(1),
+            max: Some(2),
+        }],
+        ..recipe
+    })
+    .expect("rules serialize");
+    assert_eq!(json["rules"][0]["kind"], "count");
+}
+
+#[test]
+fn validate_reports_rule_relationship_errors() {
+    let mut project: WfcProject =
+        serde_json::from_str(include_str!("testdata/wfc/project.json")).expect("fixture parses");
+    project.recipes[0].rules = vec![
+        RuleSpec::Count {
+            piece_id: 99,
+            min: Some(3),
+            max: Some(1),
+        },
+        RuleSpec::Exclude {
+            a: 1,
+            b: 99,
+            radius: 0,
+        },
+        RuleSpec::Border {
+            piece_ids: vec![99],
+        },
+        RuleSpec::Band {
+            piece_id: 1,
+            from_row: 3,
+            to_row: 1,
+        },
+        RuleSpec::Band {
+            piece_id: 1,
+            from_row: 0,
+            to_row: 3,
+        },
+    ];
+    let errors = project.validate().expect_err("invalid rules");
+    let text = errors.join("\n");
+    for expected in [
+        "count references unknown piece",
+        "min greater than max",
+        "radius must be greater",
+        "border rule references unknown piece",
+        "from_row greater",
+        "outside recipe",
+    ] {
+        assert!(text.contains(expected), "missing {expected} in {text}");
+    }
 }

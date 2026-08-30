@@ -1146,6 +1146,7 @@ mod tests {
                 seed: 1,
                 anchors: Vec::new(),
                 socket_compat: Vec::new(),
+                rules: Vec::new(),
             }],
         };
         let error = wfc_generate(project, 1, None, Some(1)).expect_err("must contradict");
@@ -1183,6 +1184,7 @@ mod tests {
                 seed: 1,
                 anchors: Vec::new(),
                 socket_compat: Vec::new(),
+                rules: Vec::new(),
             }],
         };
         let error = wfc_generate(project, 1, None, Some(1)).expect_err("must exceed budget");

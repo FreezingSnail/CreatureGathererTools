@@ -1,5 +1,5 @@
 use creaturevm::wfcmap::{
-    Anchor, GenerateError, WfcPiece, WfcProject, compile_recipe, decode, encode, generate,
+    Anchor, GenerateError, RuleSpec, WfcPiece, WfcProject, compile_recipe, decode, encode, generate,
 };
 
 const FIXTURE: &str = include_str!("testdata/wfc/project.json");
@@ -34,10 +34,16 @@ fn alternating_recipe_is_deterministic_and_bakes_slot_grid() {
     for y in 0..first.h {
         for x in 0..first.w {
             if x + 1 < first.w {
-                assert_ne!(first.tiles[(y * first.w + x) as usize], first.tiles[(y * first.w + x + 1) as usize]);
+                assert_ne!(
+                    first.tiles[(y * first.w + x) as usize],
+                    first.tiles[(y * first.w + x + 1) as usize]
+                );
             }
             if y + 1 < first.h {
-                assert_ne!(first.tiles[(y * first.w + x) as usize], first.tiles[((y + 1) * first.w + x) as usize]);
+                assert_ne!(
+                    first.tiles[(y * first.w + x) as usize],
+                    first.tiles[((y + 1) * first.w + x) as usize]
+                );
             }
         }
     }
@@ -128,5 +134,122 @@ fn validation_is_returned_before_solver() {
 fn fixture_rle_decoder_accepts_golden_shape() {
     let project = project();
     let hunk = generate(&project, 1, None, Some(7)).expect("generate");
-    assert_eq!(decode(&encode(&hunk.tiles), hunk.tiles.len()).unwrap(), hunk.tiles);
+    assert_eq!(
+        decode(&encode(&hunk.tiles), hunk.tiles.len()).unwrap(),
+        hunk.tiles
+    );
+}
+
+fn free_project(size_w: u32, size_h: u32) -> WfcProject {
+    let mut project = project();
+    for piece in &mut project.pieces {
+        piece.edge_overrides.clear();
+        piece.tiles = "1".to_string();
+    }
+    project.recipes[0].size_w = size_w;
+    project.recipes[0].size_h = size_h;
+    project
+}
+
+#[test]
+fn border_and_band_rules_constrain_only_their_target_cells() {
+    let mut border = free_project(4, 3);
+    border.recipes[0].rules = vec![RuleSpec::Border { piece_ids: vec![1] }];
+    let hunk = generate(&border, 1, None, Some(4)).expect("border rule");
+    for (cell, symbol) in hunk.slots.iter().enumerate() {
+        let x = cell as u32 % 4;
+        let y = cell as u32 / 4;
+        if x == 0 || y == 0 || x == 3 || y == 2 {
+            assert_eq!(*symbol, 0, "border cell {cell}");
+        }
+    }
+
+    let mut band = free_project(4, 3);
+    band.recipes[0].rules = vec![RuleSpec::Band {
+        piece_id: 1,
+        from_row: 1,
+        to_row: 1,
+    }];
+    let hunk = generate(&band, 1, None, Some(4)).expect("band rule");
+    for (cell, symbol) in hunk.slots.iter().enumerate() {
+        if cell as u32 / 4 != 1 {
+            assert_ne!(*symbol, 0, "piece one outside band at {cell}");
+        }
+    }
+}
+
+#[test]
+fn count_and_exclude_rules_retry_and_name_unsatisfied_rules() {
+    let mut count = free_project(4, 3);
+    count.recipes[0].rules = vec![RuleSpec::Count {
+        piece_id: 1,
+        min: Some(13),
+        max: None,
+    }];
+    let error = generate(&count, 1, None, Some(2)).expect_err("impossible minimum");
+    assert!(
+        matches!(error, GenerateError::RuleUnsatisfied { ref rule, attempts: 10 } if rule.contains("count piece 1"))
+    );
+
+    let mut max = free_project(4, 3);
+    max.recipes[0].piece_ids = vec![1];
+    max.recipes[0].rules = vec![RuleSpec::Count {
+        piece_id: 1,
+        min: None,
+        max: Some(0),
+    }];
+    let error = generate(&max, 1, None, Some(2)).expect_err("impossible maximum");
+    assert!(
+        matches!(error, GenerateError::RuleUnsatisfied { ref rule, .. } if rule.contains("max Some(0)"))
+    );
+
+    let mut exclude = free_project(2, 1);
+    exclude.recipes[0].rules = vec![RuleSpec::Exclude {
+        a: 1,
+        b: 2,
+        radius: 1,
+    }];
+    exclude.recipes[0].anchors = vec![
+        Anchor {
+            piece_id: 1,
+            sx: 0,
+            sy: 0,
+        },
+        Anchor {
+            piece_id: 2,
+            sx: 1,
+            sy: 0,
+        },
+    ];
+    let error = generate(&exclude, 1, None, Some(2)).expect_err("adjacent exclusion");
+    assert!(
+        matches!(error, GenerateError::RuleUnsatisfied { ref rule, .. } if rule.contains("exclude pieces 1/2 radius 1"))
+    );
+}
+
+#[test]
+fn active_rules_preserve_determinism_and_band_impossibility_is_typed() {
+    let mut project = free_project(4, 3);
+    project.recipes[0].rules = vec![RuleSpec::Count {
+        piece_id: 1,
+        min: Some(0),
+        max: Some(4),
+    }];
+    assert_eq!(
+        generate(&project, 1, None, Some(99)).unwrap(),
+        generate(&project, 1, None, Some(99)).unwrap()
+    );
+
+    project.recipes[0].piece_ids = vec![1];
+    project.recipes[0].size_w = 1;
+    project.recipes[0].size_h = 2;
+    project.recipes[0].rules = vec![RuleSpec::Band {
+        piece_id: 1,
+        from_row: 0,
+        to_row: 0,
+    }];
+    let error = generate(&project, 1, None, Some(1)).expect_err("band cannot fill row one");
+    assert!(
+        matches!(error, GenerateError::RuleUnsatisfied { ref rule, .. } if rule.contains("band piece 1"))
+    );
 }

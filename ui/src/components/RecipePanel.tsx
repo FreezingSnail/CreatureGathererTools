@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { GameMap, Hunk, WfcPiece, WfcProject, WfcRecipe } from "../types";
+import type { GameMap, Hunk, RuleSpec, WfcPiece, WfcProject, WfcRecipe } from "../types";
 import { encode } from "../rle";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -92,6 +92,30 @@ function symbolPiece(symbol: number, pieceIds: number[], pieces: WfcPiece[], slo
   return -1;
 }
 
+const HISTORY_LIMIT = 6;
+
+function pieceName(pieces: WfcPiece[], id: number): string {
+  return pieces.find((piece) => piece.id === id)?.name || `piece ${id}`;
+}
+
+export function ruleSummary(rule: RuleSpec, pieces: WfcPiece[]): string {
+  switch (rule.kind) {
+    case "count": return `Count ${pieceName(pieces, rule.piece_id)}${rule.min !== null ? ` at least ${rule.min}` : ""}${rule.max !== null ? ` at most ${rule.max}` : ""}`;
+    case "exclude": return `Exclude ${pieceName(pieces, rule.a)} and ${pieceName(pieces, rule.b)} within ${rule.radius} slot${rule.radius === 1 ? "" : "s"}`;
+    case "border": return `Border: ${rule.piece_ids.map((id) => pieceName(pieces, id)).join(", ") || "no pieces"}`;
+    case "band": return `Band ${pieceName(pieces, rule.piece_id)} on rows ${rule.from_row}–${rule.to_row}`;
+  }
+}
+
+function ruleDefaults(kind: RuleSpec["kind"], pieces: WfcPiece[], recipe: WfcRecipe): RuleSpec {
+  const first = pieces[0]?.id ?? 0;
+  const second = pieces[1]?.id ?? first;
+  if (kind === "count") return { kind, piece_id: first, min: null, max: null };
+  if (kind === "exclude") return { kind, a: first, b: second, radius: 1 };
+  if (kind === "border") return { kind, piece_ids: pieces.length > 0 ? [first] : [] };
+  return { kind, piece_id: first, from_row: 0, to_row: Math.max(0, recipe.size_h - 1) };
+}
+
 function HunkPreview({ hunk, tiles, pieceIds, pieces }: { hunk: Hunk; tiles: HTMLCanvasElement[]; pieceIds: number[]; pieces: WfcPiece[] }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
@@ -154,6 +178,7 @@ export function RecipePanel({ project, pieces, tiles, map, onProjectChange, onMa
   const [hoverSlot, setHoverSlot] = useState<SlotSize | null>(null);
   const [anchorError, setAnchorError] = useState<string | null>(null);
   const [generated, setGenerated] = useState<Hunk | null>(null);
+  const [history, setHistory] = useState<Hunk[]>([]);
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [errorSlot, setErrorSlot] = useState<SlotSize | null>(null);
 
@@ -163,6 +188,7 @@ export function RecipePanel({ project, pieces, tiles, map, onProjectChange, onMa
   const orphans = recipe ? orphanedAnchors(recipe, pieces, project.slot_w, project.slot_h) : [];
   const maxW = project.slot_w > 0 ? Math.floor(256 / project.slot_w) : 0;
   const maxH = project.slot_h > 0 ? Math.floor(256 / project.slot_h) : 0;
+  const rules = recipe?.rules ?? [];
 
   useEffect(() => {
     if (selectedId !== null && !project.recipes.some((item) => item.id === selectedId)) {
@@ -187,6 +213,7 @@ export function RecipePanel({ project, pieces, tiles, map, onProjectChange, onMa
       seed: 1,
       anchors: [],
       socket_compat: [],
+      rules: [],
     };
     onProjectChange({ ...project, recipes: [...project.recipes, next] });
     setSelectedId(id);
@@ -198,6 +225,7 @@ export function RecipePanel({ project, pieces, tiles, map, onProjectChange, onMa
     onProjectChange({ ...project, recipes: next });
     setSelectedId(next[0]?.id ?? null);
     setGenerated(null);
+    setHistory([]);
   };
 
   const renameRecipe = () => {
@@ -240,7 +268,19 @@ export function RecipePanel({ project, pieces, tiles, map, onProjectChange, onMa
     updateRecipe({ anchors: [...recipe.anchors, { piece_id: piece.id, sx, sy }] });
   };
 
+  const updateRule = (index: number, update: Partial<RuleSpec>) => {
+    if (!recipe) return;
+    const current = rules[index];
+    if (!current) return;
+    updateRecipe({ rules: rules.map((rule, item) => item === index ? { ...rule, ...update } as RuleSpec : rule) });
+  };
+
+
   const removeAnchor = (index: number) => updateRecipe({ anchors: recipe?.anchors.filter((_, item) => item !== index) ?? [] });
+
+  const addRule = (kind: RuleSpec["kind"]) => updateRecipe({ rules: [...rules, ruleDefaults(kind, pieces, recipe!)] });
+  const removeRule = (index: number) => updateRecipe({ rules: rules.filter((_, item) => item !== index) });
+
 
   const runGenerate = async (seed: number) => {
     if (!recipe) return;
@@ -256,6 +296,7 @@ export function RecipePanel({ project, pieces, tiles, map, onProjectChange, onMa
         seed,
       });
       setGenerated(hunk);
+      setHistory((previous) => [...previous, hunk].slice(-HISTORY_LIMIT));
     } catch (error) {
       const message = String(error);
       setGenerationError(message);
@@ -289,7 +330,7 @@ export function RecipePanel({ project, pieces, tiles, map, onProjectChange, onMa
   }) ?? false;
   const ghost = selectedAnchorPiece === null ? null : pieceFootprint(pieces.find((piece) => piece.id === selectedAnchorPiece), project.slot_w, project.slot_h);
 
-  return <section aria-label="WFC recipes" className="col-span-full rounded-lg border p-3">
+  return (<section aria-label="WFC recipes" className="col-span-full rounded-lg border p-3">
     <div className="flex flex-wrap items-center gap-2">
       <h2 className="font-medium">Recipes</h2>
       <Button type="button" size="sm" onClick={createRecipe}>Create recipe</Button>
@@ -323,6 +364,17 @@ export function RecipePanel({ project, pieces, tiles, map, onProjectChange, onMa
           {recipe.socket_compat.map(([left, right], index) => <div className="flex items-center gap-2 text-xs" key={`${left}-${right}-${index}`}><span>{left} ↔ {right}</span><Button type="button" size="xs" variant="ghost" onClick={() => updateRecipe({ socket_compat: recipe.socket_compat.filter((_, item) => item !== index) })}>Remove</Button></div>)}
           <CompatAdder labels={project.socket_labels.map((label) => ({ id: label.id, name: label.name }))} onAdd={(pair) => updateRecipe({ socket_compat: [...recipe.socket_compat, pair] })} />
         </fieldset>
+        <fieldset aria-label="Placement rules" className="rounded border p-2"><legend className="px-1 text-xs font-medium">Placement rules</legend>
+          <div className="mb-2 flex flex-wrap gap-1"><Button type="button" size="xs" variant="outline" onClick={() => addRule("count")}>Add count rule</Button><Button type="button" size="xs" variant="outline" onClick={() => addRule("exclude")}>Add exclude rule</Button><Button type="button" size="xs" variant="outline" onClick={() => addRule("border")}>Add border rule</Button><Button type="button" size="xs" variant="outline" onClick={() => addRule("band")}>Add band rule</Button></div>
+          {rules.length === 0 && <p className="text-xs text-muted-foreground">No placement rules.</p>}
+          <div className="space-y-2">{rules.map((rule, index) => <div key={`${rule.kind}-${index}`} className="rounded border p-2 text-xs">
+            <div className="mb-1 flex items-center justify-between gap-2"><span>{ruleSummary(rule, pieces)}</span><Button type="button" size="xs" variant="ghost" onClick={() => removeRule(index)}>Remove rule</Button></div>
+            {rule.kind === "count" && <div className="flex flex-wrap gap-1"><select aria-label={`Count rule ${index} piece`} value={rule.piece_id} onChange={(event) => updateRule(index, { piece_id: Number(event.target.value) })}>{pieces.map((piece) => <option key={piece.id} value={piece.id}>{piece.name || piece.id}</option>)}</select><Input aria-label={`Count rule ${index} minimum`} type="number" min="0" placeholder="min" value={rule.min ?? ""} onChange={(event) => updateRule(index, { min: event.target.value === "" ? null : Math.max(0, Number(event.target.value)) })} /><Input aria-label={`Count rule ${index} maximum`} type="number" min="0" placeholder="max" value={rule.max ?? ""} onChange={(event) => updateRule(index, { max: event.target.value === "" ? null : Math.max(0, Number(event.target.value)) })} /></div>}
+            {rule.kind === "exclude" && <div className="flex flex-wrap gap-1"><select aria-label={`Exclude rule ${index} piece a`} value={rule.a} onChange={(event) => updateRule(index, { a: Number(event.target.value) })}>{pieces.map((piece) => <option key={piece.id} value={piece.id}>{piece.name || piece.id}</option>)}</select><select aria-label={`Exclude rule ${index} piece b`} value={rule.b} onChange={(event) => updateRule(index, { b: Number(event.target.value) })}>{pieces.map((piece) => <option key={piece.id} value={piece.id}>{piece.name || piece.id}</option>)}</select><Input aria-label={`Exclude rule ${index} radius`} type="number" min="1" value={rule.radius} onChange={(event) => updateRule(index, { radius: Math.max(1, Number(event.target.value) || 1) })} /></div>}
+            {rule.kind === "border" && <div className="flex flex-wrap gap-1">{pieces.map((piece) => <label key={piece.id} className="flex items-center gap-1"><input type="checkbox" aria-label={`Border rule ${index} ${piece.name || piece.id}`} checked={rule.piece_ids.includes(piece.id)} onChange={(event) => updateRule(index, { piece_ids: event.target.checked ? [...rule.piece_ids, piece.id] : rule.piece_ids.filter((id) => id !== piece.id) })} />{piece.name || piece.id}</label>)}</div>}
+            {rule.kind === "band" && <div className="flex flex-wrap gap-1"><select aria-label={`Band rule ${index} piece`} value={rule.piece_id} onChange={(event) => updateRule(index, { piece_id: Number(event.target.value) })}>{pieces.map((piece) => <option key={piece.id} value={piece.id}>{piece.name || piece.id}</option>)}</select><Input aria-label={`Band rule ${index} from row`} type="number" min="0" max={Math.max(0, recipe.size_h - 1)} value={rule.from_row} onChange={(event) => updateRule(index, { from_row: Math.max(0, Number(event.target.value) || 0) })} /><Input aria-label={`Band rule ${index} to row`} type="number" min="0" max={Math.max(0, recipe.size_h - 1)} value={rule.to_row} onChange={(event) => updateRule(index, { to_row: Math.max(0, Number(event.target.value) || 0) })} /></div>}
+          </div>)}</div>
+        </fieldset>
       </div>
       <div className="space-y-3">
         <fieldset className="rounded border p-2"><legend className="px-1 text-xs font-medium">Anchors</legend>
@@ -334,12 +386,13 @@ export function RecipePanel({ project, pieces, tiles, map, onProjectChange, onMa
           <p className="mt-1 text-xs text-muted-foreground">Pick a piece, then click its top-left slot. Ghost shows footprint.</p>
           <ul className="mt-2 space-y-1 text-xs">{recipe.anchors.map((anchor, index) => <li key={`${anchor.piece_id}-${anchor.sx}-${anchor.sy}-${index}`} className="flex items-center justify-between gap-2"><span>{pieces.find((piece) => piece.id === anchor.piece_id)?.name || `Piece ${anchor.piece_id}`} at ({anchor.sx}, {anchor.sy})</span><Button type="button" size="xs" variant="ghost" onClick={() => removeAnchor(index)}>Remove</Button></li>)}</ul>
         </fieldset>
-        <div className="flex flex-wrap items-center gap-2"><Button type="button" onClick={() => runGenerate(recipe.seed)}>Generate</Button><Button type="button" variant="outline" onClick={() => runGenerate(recipe.seed + 1)}>Reroll (seed + 1)</Button>{generated && <Button type="button" variant="outline" onClick={saveStamp}>Save as stamp</Button>}</div>
+        <div className="flex flex-wrap items-center gap-2"><Button type="button" onClick={() => runGenerate(recipe.seed)}>Generate</Button><Button type="button" variant="outline" onClick={() => runGenerate(recipe.seed + 1)}>Reroll (seed + 1)</Button>{generated && <Button type="button" variant="outline" onClick={saveStamp}>Save as stamp</Button>}{history.length > 0 && <Button type="button" size="sm" variant="ghost" onClick={() => { setHistory([]); setGenerated(null); }}>Clear hunk history</Button>}</div>
         {generationError && <div role="alert" className="whitespace-pre-wrap rounded border border-destructive p-2 text-destructive">{generationError}{errorSlot && ` — failing slot (${errorSlot.w}, ${errorSlot.h}) highlighted.`}</div>}
+        {history.length > 0 && <section aria-label="Hunk history" className="rounded border p-2"><div className="mb-1 flex items-center justify-between"><strong className="text-xs">Recent hunks</strong><span className="text-xs text-muted-foreground">{history.length}/{HISTORY_LIMIT}</span></div><div className="flex flex-wrap gap-1">{history.map((hunk, index) => <Button key={`${hunk.seed}-${index}`} type="button" size="xs" variant={generated === hunk ? "default" : "outline"} onClick={() => setGenerated(hunk)}>Seed {hunk.seed} · {hunk.attempts} attempts</Button>)}</div></section>}
         {generated && <div className="rounded border p-2"><div className="mb-2 text-xs text-muted-foreground">Generated {generated.w}×{generated.h} tiles · seed {generated.seed} · attempts {generated.attempts} · {generated.slots.length} slot symbols</div><HunkPreview hunk={generated} tiles={tiles} pieceIds={recipe.piece_ids} pieces={pieces} /></div>}
       </div>
     </div>}
-  </section>;
+  </section>);
 }
 
 function CompatAdder({ labels, onAdd }: { labels: { id: number; name: string }[]; onAdd: (pair: [number, number]) => void }) {

@@ -23,7 +23,7 @@ mod solve;
 
 pub use rng::Rng;
 pub use rules::{Rules, RulesError};
-pub use solve::{Params, Preset, WfcError, solve};
+pub use solve::{ObservationFilter, Params, Preset, WfcError, solve, solve_with_filter};
 
 /// The four von Neumann neighbours. Discriminants are stable: they index the
 /// propagator's per-direction tables.

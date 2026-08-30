@@ -127,6 +127,33 @@ pub struct WfcRecipe {
     pub anchors: Vec<Anchor>,
     #[serde(default)]
     pub socket_compat: Vec<(u32, u32)>,
+    #[serde(default)]
+    pub rules: Vec<RuleSpec>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum RuleSpec {
+    Count {
+        piece_id: u32,
+        #[serde(default)]
+        min: Option<u32>,
+        #[serde(default)]
+        max: Option<u32>,
+    },
+    Exclude {
+        a: u32,
+        b: u32,
+        radius: u32,
+    },
+    Border {
+        piece_ids: Vec<u32>,
+    },
+    Band {
+        piece_id: u32,
+        from_row: u32,
+        to_row: u32,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -268,6 +295,77 @@ impl WfcProject {
                         "recipe {} references unknown piece {}",
                         recipe.id, piece_id
                     ));
+                }
+            }
+
+            for rule in &recipe.rules {
+                match rule {
+                    RuleSpec::Count { piece_id, min, max } => {
+                        if !piece_ids.contains(piece_id) {
+                            errors.push(format!(
+                                "recipe {} rule count references unknown piece {}",
+                                recipe.id, piece_id
+                            ));
+                        }
+                        if let (Some(min), Some(max)) = (min, max)
+                            && min > max
+                        {
+                            errors.push(format!(
+                                "recipe {} count rule for piece {} has min greater than max",
+                                recipe.id, piece_id
+                            ));
+                        }
+                    }
+                    RuleSpec::Exclude { a, b, radius } => {
+                        for piece_id in [a, b] {
+                            if !piece_ids.contains(piece_id) {
+                                errors.push(format!(
+                                    "recipe {} rule exclude references unknown piece {}",
+                                    recipe.id, piece_id
+                                ));
+                            }
+                        }
+                        if *radius == 0 {
+                            errors.push(format!(
+                                "recipe {} exclude rule radius must be greater than zero",
+                                recipe.id
+                            ));
+                        }
+                    }
+                    RuleSpec::Border { piece_ids: allowed } => {
+                        for piece_id in allowed {
+                            if !piece_ids.contains(piece_id) {
+                                errors.push(format!(
+                                    "recipe {} border rule references unknown piece {}",
+                                    recipe.id, piece_id
+                                ));
+                            }
+                        }
+                    }
+                    RuleSpec::Band {
+                        piece_id,
+                        from_row,
+                        to_row,
+                    } => {
+                        if !piece_ids.contains(piece_id) {
+                            errors.push(format!(
+                                "recipe {} band rule references unknown piece {}",
+                                recipe.id, piece_id
+                            ));
+                        }
+                        if from_row > to_row {
+                            errors.push(format!(
+                                "recipe {} band rule has from_row greater than to_row",
+                                recipe.id
+                            ));
+                        }
+                        if *to_row >= recipe.size_h {
+                            errors.push(format!(
+                                "recipe {} band rule row {} is outside recipe height {}",
+                                recipe.id, to_row, recipe.size_h
+                            ));
+                        }
+                    }
                 }
             }
 

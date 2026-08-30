@@ -1,4 +1,32 @@
-use cgfx_wfc::{Dir, Grid, Params, Preset, Rules, WfcError, solve};
+#[test]
+fn observation_filter_is_honoured_and_deterministic() {
+    let grid = Grid::new(4, 1);
+    let rules = {
+        let mut rules = Rules::new(2);
+        rules.allow_all_dirs(0, 0).allow_all_dirs(1, 1);
+        rules
+    };
+    let filter = CellFilter { cell: 0, symbol: 1 };
+    let params = Params::seeded(44);
+    let first = solve_with_filter(grid, &rules, &[], &params, &filter).unwrap();
+    let second = solve_with_filter(grid, &rules, &[], &params, &filter).unwrap();
+    assert_eq!(first, second);
+    assert_eq!(first[0], 1);
+}
+use cgfx_wfc::{
+    Dir, Grid, ObservationFilter, Params, Preset, Rules, WfcError, solve, solve_with_filter,
+};
+
+struct CellFilter {
+    cell: usize,
+    symbol: u32,
+}
+
+impl ObservationFilter for CellFilter {
+    fn allows(&self, cell: usize, symbol: u32, _decided: &[Option<u32>]) -> bool {
+        cell != self.cell || symbol == self.symbol
+    }
+}
 
 fn checkerboard_rules() -> Rules {
     let mut rules = Rules::new(2);

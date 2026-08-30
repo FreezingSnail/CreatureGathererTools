@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use cgfx_wfc::{Dir, Grid, Preset, Rules};
 
 use super::{
-    GenerateError, ResolvedSocket, Slice, WfcPiece, WfcProject, WfcRecipe, slice_piece,
+    GenerateError, ResolvedSocket, RuleSpec, Slice, WfcPiece, WfcProject, WfcRecipe, slice_piece,
     sockets_match,
 };
 
@@ -24,7 +24,7 @@ pub struct CompiledRecipe {
     pub grid: Grid,
     pub symbols: Vec<SymbolInfo>,
     pub presets: Vec<Preset>,
-    pub limits: Vec<(u32, u32)>,
+    pub placement_rules: Vec<RuleSpec>,
     pub slot_w: u32,
     pub slot_h: u32,
 }
@@ -192,14 +192,78 @@ pub fn compile_recipe_for_size(
 
     let grid = Grid::new(size_w, size_h);
     let mut presets = Vec::new();
-    let mut limits = Vec::new();
+    let mut placement_rules = recipe.rules.clone();
     for piece in &pieces {
-        if let Some(limit) = piece.limit
-            && let Some((symbol, _)) = slices_by_piece[&piece.id]
-                .iter()
-                .find(|(_, slice)| slice.is_anchor)
-        {
-            limits.push((*symbol, limit));
+        if let Some(limit) = piece.limit {
+            if let Some(RuleSpec::Count { max, .. }) = placement_rules.iter_mut().find(
+                |rule| matches!(rule, RuleSpec::Count { piece_id, .. } if *piece_id == piece.id),
+            ) {
+                *max = Some(max.map_or(limit, |current| current.min(limit)));
+            } else {
+                placement_rules.push(RuleSpec::Count {
+                    piece_id: piece.id,
+                    min: None,
+                    max: Some(limit),
+                });
+            }
+        }
+    }
+
+    for rule in &placement_rules {
+        match rule {
+            RuleSpec::Border { piece_ids } => {
+                let allowed: Vec<u32> = symbols
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, info)| piece_ids.contains(&info.piece_id))
+                    .map(|(symbol, _)| symbol as u32)
+                    .collect();
+                for y in 0..size_h {
+                    for x in 0..size_w {
+                        if x == 0 || y == 0 || x + 1 == size_w || y + 1 == size_h {
+                            if allowed.is_empty() {
+                                return Err(GenerateError::RuleUnsatisfied {
+                                    rule: format_rule(rule),
+                                    attempts: 0,
+                                });
+                            }
+                            presets.push(Preset {
+                                cell: grid.index(x, y),
+                                allowed: allowed.clone(),
+                            });
+                        }
+                    }
+                }
+            }
+            RuleSpec::Band {
+                piece_id,
+                from_row,
+                to_row,
+            } => {
+                let allowed: Vec<u32> = symbols
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, info)| info.piece_id != *piece_id)
+                    .map(|(symbol, _)| symbol as u32)
+                    .collect();
+                for y in 0..size_h {
+                    if y < *from_row || y > *to_row {
+                        for x in 0..size_w {
+                            if allowed.is_empty() {
+                                return Err(GenerateError::RuleUnsatisfied {
+                                    rule: format_rule(rule),
+                                    attempts: 0,
+                                });
+                            }
+                            presets.push(Preset {
+                                cell: grid.index(x, y),
+                                allowed: allowed.clone(),
+                            });
+                        }
+                    }
+                }
+            }
+            RuleSpec::Count { .. } | RuleSpec::Exclude { .. } => {}
         }
     }
     for anchor in &recipe.anchors {
@@ -219,12 +283,26 @@ pub fn compile_recipe_for_size(
         grid,
         symbols,
         presets,
-        limits,
+        placement_rules,
         slot_w: project.slot_w,
         slot_h: project.slot_h,
     })
 }
 
+fn format_rule(rule: &RuleSpec) -> String {
+    match rule {
+        RuleSpec::Count { piece_id, min, max } => {
+            format!("count piece {piece_id} min {min:?} max {max:?}")
+        }
+        RuleSpec::Exclude { a, b, radius } => format!("exclude pieces {a}/{b} radius {radius}"),
+        RuleSpec::Border { piece_ids } => format!("border pieces {piece_ids:?}"),
+        RuleSpec::Band {
+            piece_id,
+            from_row,
+            to_row,
+        } => format!("band piece {piece_id} rows {from_row}..={to_row}"),
+    }
+}
 fn same_socket_family(left: &ResolvedSocket, right: &ResolvedSocket) -> bool {
     matches!(
         (left, right),

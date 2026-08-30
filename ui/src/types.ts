@@ -74,6 +74,12 @@ export interface Anchor {
   sy: number;
 }
 
+export type RuleSpec =
+  | { kind: "count"; piece_id: number; min: number | null; max: number | null }
+  | { kind: "exclude"; a: number; b: number; radius: number }
+  | { kind: "border"; piece_ids: number[] }
+  | { kind: "band"; piece_id: number; from_row: number; to_row: number };
+
 export interface WfcRecipe {
   id: number;
   name: string;
@@ -83,6 +89,7 @@ export interface WfcRecipe {
   seed: number;
   anchors: Anchor[];
   socket_compat: [number, number][];
+  rules?: RuleSpec[];
 }
 
 export interface WfcProject {

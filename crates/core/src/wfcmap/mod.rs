@@ -13,8 +13,8 @@ pub use compile::{CompiledRecipe, SymbolInfo, compile_recipe, compile_recipe_for
 pub use generate::{GenerateError, generate};
 pub use rle::{RleError, decode, encode};
 pub use schema::{
-    Anchor, EdgeSocket, Side, SocketKind, SocketLabel, Stamp, StampOrigin, ValidationIssue,
-    WfcPiece, WfcProject, WfcRecipe,
+    Anchor, EdgeSocket, RuleSpec, Side, SocketKind, SocketLabel, Stamp, StampOrigin,
+    ValidationIssue, WfcPiece, WfcProject, WfcRecipe,
 };
 pub use slice::{ResolvedSocket, Slice, SliceError, slice_piece, validate_edge_overrides};
 pub use socket::sockets_match;

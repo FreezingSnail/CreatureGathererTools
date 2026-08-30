@@ -272,7 +272,9 @@ fn generate_failure(error: GenerateError) -> CliFailure {
         GenerateError::AnchorOutOfBounds { .. } | GenerateError::AnchorOverlap { .. } => {
             CliFailure::invalid(error.to_string())
         }
-        GenerateError::LimitUnsatisfied { .. } => CliFailure::budget(error.to_string()),
+        GenerateError::RuleUnsatisfied { .. } | GenerateError::LimitUnsatisfied { .. } => {
+            CliFailure::budget(error.to_string())
+        }
         GenerateError::Solver(WfcError::Contradiction { .. }) => {
             CliFailure::contradiction(error.to_string())
         }

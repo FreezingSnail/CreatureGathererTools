@@ -150,20 +150,21 @@ game content into engine-ready artifacts:
 
 ## Architecture
 
-Three layers, dependency direction `ui → src-tauri → crates/core`:
+Four layers, dependency direction `ui → src-tauri → crates/core → crates/wfc`:
 
 ### 1. React frontend — `ui/`
 
 React 18 + TypeScript + Vite + Tailwind v4 + shadcn/ui (Radix) primitives. Runs as
 the Tauri webview.
 
-- Tab shell (`App.tsx`): Map / Creature / Move editors stay mounted; inactive tabs
-  hidden via CSS to preserve per-editor state. First-run SetupDialog for config.
-  All three editors keyed by `bootKey`, remounted only on config reload.
-- `editor.tsx` — map canvas editor (tile painting, palette, layers).
+- Tab shell (`App.tsx`): Map / Creature / Move / Layout / WFC views stay mounted; inactive tabs
+  are hidden via CSS to preserve per-view state. First-run SetupDialog for config.
+  Editors remount only on config reload through `bootKey`.
+- `editor.tsx` — map canvas editor (tile painting, palette, layers) plus tile-stamp paste and WFC-piece capture.
 - `components/CreatureEditor.tsx`, `components/MoveEditor.tsx` — stat/field editors.
+- `components/WfcTab.tsx`, `components/RecipePanel.tsx` — WFC piece, socket, recipe, anchor, preview, rule, and stamp authoring; the ephemeral six-entry hunk history tray stays in component state.
 - `scriptPane.tsx` — script source editing with parse feedback from the backend.
-- Pure logic extracted for unit testing: `state.ts`, `geometry.ts`, `tileset.ts`,
+- Pure logic extracted for unit testing: `state.ts`, `geometry.ts`, `tileset.ts`, `wfc.ts`,
   `lib/validation.ts`.
 - Talks to the backend exclusively via `@tauri-apps/api` `invoke()` — never
   touches the filesystem or game data directly.
@@ -175,10 +176,11 @@ Thin IPC layer over the core library. Rules:
 - Every `#[tauri::command]` returns a serializable value or `Result<_, String>` —
   **no panics across IPC, no `clap` in this layer**.
 - Commands wrap `creaturevm` (cgfx-core): `load_config`/`save_config`,
-  `load_map`/`save_map`, `compile_map`, `parse_script`, `read_file_bytes`, etc.
+  `load_map`/`save_map`, `compile_map`, `parse_script`, `read_file_bytes`,
+  `capture_piece`, `wfc_generate`, `wfc_validate`, `tiled_import_path(path, current)`, etc.
 - App-level state is just the `Config`; stores are constructed per operation.
 
-### 3. Rust core — `crates/core/` (lib `creaturevm`, bin `pokervm-rust`)
+### 3. Rust core — `crates/core/` (lib `creaturevm`, bin `cgfx-tools`)
 
 CLI + reusable library. Pipeline stages (see `src/main.rs`):
 
@@ -190,7 +192,18 @@ CLI + reusable library. Pipeline stages (see `src/main.rs`):
    (offset table + ASCII blob) + bytecode block, padded to 256-byte alignment.
 
 Supporting modules: `builder.rs`, `store.rs`, `config.rs`, `tiled.rs`, `model.rs`
-(domain types: `Creature`, `GameMap`, `Move`).
+(domain types: `Creature`, `GameMap`, `Move`), and `wfcmap/`. `wfcmap` persists
+`GameMap.wfc` project data, including serde-default count/exclude/border/band rules,
+and `GameMap.stamps` tile blocks; it slices variable-size pieces, compiles sockets,
+anchors and placement presets, then bakes generated hunks. See
+`crates/core/docs/wfc.md` for the slot model and deterministic generation contract.
+
+### 4. Domain-free solver — `crates/wfc/` (crate `cgfx-wfc`)
+
+`cgfx-wfc` accepts opaque symbols, directional adjacency rules, weights, presets,
+and a grid. It owns deterministic xoshiro256** RNG, restart, propagation-step,
+and memory limits; it has no map, tile, JSON, or filesystem dependency. Core's
+`wfcmap` adapter is its only project-facing layer.
 
 ## Build & Test
 

@@ -69,7 +69,7 @@ function projectWithDefaults(value: WfcProject | undefined): WfcProject {
     ...value,
     pieces: value.pieces ?? [],
     socket_labels: value.socket_labels ?? [],
-    recipes: value.recipes ?? [],
+    recipes: (value.recipes ?? []).map((recipe) => ({ ...recipe, rules: recipe.rules ?? [] })),
   } : { ...DEFAULT_PROJECT };
 }
 

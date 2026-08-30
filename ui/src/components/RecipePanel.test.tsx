@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import type { GameMap, WfcProject } from "../types";
-import { RecipePanel, parseErrorSlot, recipeMemoryEstimate, recipeSymbolCount, screenToSlots } from "./RecipePanel";
+import { RecipePanel, parseErrorSlot, recipeMemoryEstimate, recipeSymbolCount, ruleSummary, screenToSlots } from "./RecipePanel";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 const mockInvoke = vi.mocked(invoke) as unknown as ReturnType<typeof vi.fn>;
@@ -108,3 +108,34 @@ describe("RecipePanel", () => {
     expect(parseErrorSlot("WFC generation failed: contradiction at slot (3, 5)")).toEqual({ w: 3, h: 5 });
   });
 });
+
+  it("adds, edits, removes rules and renders plain-language summaries", () => {
+    const { onProjectChange } = renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: "Add count rule" }));
+    expect(onProjectChange.mock.calls[onProjectChange.mock.calls.length - 1]?.[0].recipes[0].rules).toEqual([{ kind: "count", piece_id: 1, min: null, max: null }]);
+    fireEvent.change(screen.getByLabelText("Count rule 0 minimum"), { target: { value: "2" } });
+    expect(onProjectChange.mock.calls[onProjectChange.mock.calls.length - 1]?.[0].recipes[0].rules[0]).toMatchObject({ min: 2 });
+    expect(screen.getByText("Count Road at least 2")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Remove rule" }));
+    expect(onProjectChange.mock.calls[onProjectChange.mock.calls.length - 1]?.[0].recipes[0].rules).toEqual([]);
+    expect(ruleSummary({ kind: "exclude", a: 1, b: 2, radius: 1 }, project().pieces)).toBe("Exclude Road and Wall within 1 slot");
+  });
+
+  it("bounds hunk history, selects an older hunk, and saves it as a stamp", async () => {
+    mockInvoke.mockImplementation(async (_command, args) => {
+      const seed = (args as { seed?: number }).seed ?? 0;
+      return { w: 2, h: 2, slot_w: 2, slot_h: 2, tiles: [seed, seed, seed, seed], slots: [seed], seed, attempts: 1 };
+    });
+    const prompt = vi.spyOn(window, "prompt").mockReturnValue("history stamp");
+    const { onMapChange } = renderPanel();
+    for (let seed = 9; seed < 16; seed += 1) {
+      fireEvent.click(seed === 9 ? screen.getByRole("button", { name: "Generate" }) : screen.getByRole("button", { name: "Reroll (seed + 1)" }));
+      await waitFor(() => expect(screen.getAllByText(new RegExp(`seed ${seed}`, "i")).length).toBeGreaterThan(0));
+    }
+    expect(screen.getByText("6/6")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Seed 9/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Seed 10/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Save as stamp" }));
+    await waitFor(() => expect(onMapChange.mock.calls[onMapChange.mock.calls.length - 1]?.[0].stamps?.[0]).toMatchObject({ origin: { seed: 10 } }));
+    prompt.mockRestore();
+  });
