@@ -32,8 +32,24 @@ impl<'a> Store<'a> {
         save_json(&self.cfg.moves_json, moves)
     }
 
+    /// Loads either canonical GameMap JSON or a Tiled interchange map. Saving
+    /// always remains canonical; Tiled is an import-only project source.
     pub fn load_map(&self) -> anyhow::Result<GameMap> {
-        load_json(&self.cfg.map_json)
+        let path = Path::new(&self.cfg.map_json);
+        let data = std::fs::read(path)
+            .map_err(|e| anyhow::anyhow!("reading {}: {e}", path.display()))?;
+        let value: serde_json::Value = serde_json::from_slice(&data)
+            .map_err(|e| anyhow::anyhow!("parsing {}: {e}", path.display()))?;
+
+        if value.get("layers").is_some() {
+            let source = std::str::from_utf8(&data)
+                .map_err(|e| anyhow::anyhow!("reading Tiled map {}: {e}", path.display()))?;
+            crate::tiled::import(source)
+                .map_err(|e| anyhow::anyhow!("importing Tiled map {}: {e}", path.display()))
+        } else {
+            serde_json::from_value(value)
+                .map_err(|e| anyhow::anyhow!("parsing canonical map {}: {e}", path.display()))
+        }
     }
 
     pub fn save_map(&self, map: &GameMap) -> anyhow::Result<()> {

@@ -955,6 +955,14 @@ fn scripts_hpp_text(blobs: &[Vec<u8>], scripts: &[String]) -> String {
     h
 }
 
+/// A Tiled location marker is the complete `@name` carried through
+/// NPCObject.script by the importer. Other NPC scripts stay executable.
+fn location_marker(script: &str) -> Option<&str> {
+    let name = script.strip_prefix('@')?;
+    (!name.is_empty() && name.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'_'))
+        .then_some(name)
+}
+
 /// Mirrors Go `BuildMap`: compiles the map's NPC + script-object scripts
 /// into per-chunk bytecode and produces every output artifact in memory.
 pub fn build_map(map: &GameMap) -> Result<MapArtifacts, BuildError> {
@@ -976,15 +984,31 @@ pub fn build_map(map: &GameMap) -> Result<MapArtifacts, BuildError> {
         }
     }
 
-    // Collect every non-empty script by chunk index (Go entry order:
-    // NPCs first, then script objects).
+    // Tiled locations are represented by NPCObject entries because GameMap
+    // has no dedicated location-name field. A bare @name is metadata, not an
+    // executable NPC script; make it available to script location resolution.
+    let mut locations = HashMap::new();
+    for npc in &map.npcs {
+        if let Some(name) = location_marker(&npc.script) {
+            let x = u16::try_from(npc.x).map_err(|_| {
+                BuildError(format!("location @{name} has invalid x coordinate {}", npc.x))
+            })?;
+            let y = u16::try_from(npc.y).map_err(|_| {
+                BuildError(format!("location @{name} has invalid y coordinate {}", npc.y))
+            })?;
+            locations.insert(name.to_owned(), (x, y));
+        }
+    }
+
+    // Collect every non-empty executable script by chunk index (NPCs first,
+    // then script objects). Location markers were consumed above.
     struct ScriptEntry {
         chunk_idx: usize,
         src: String,
     }
     let mut entries = Vec::new();
     for npc in &map.npcs {
-        if !npc.script.is_empty() {
+        if !npc.script.is_empty() && location_marker(&npc.script).is_none() {
             let idx = ((npc.y / CHUNK_H) * CHUNK_COLS + npc.x / CHUNK_W) as usize;
             entries.push(ScriptEntry {
                 chunk_idx: idx,
@@ -1002,10 +1026,7 @@ pub fn build_map(map: &GameMap) -> Result<MapArtifacts, BuildError> {
         }
     }
 
-    // Compile context. Go builds `locations := map[string][2]uint16{}`
-    // (empty) — mirror exactly.
     let mut ctrl = script::Controller::new();
-    let locations: HashMap<String, (u16, u16)> = HashMap::new();
 
     let mut chunk_blobs: Vec<Vec<u8>> = vec![Vec::new(); TOTAL_CHUNKS];
     let mut chunk_scripts: Vec<String> = vec![String::new(); TOTAL_CHUNKS];

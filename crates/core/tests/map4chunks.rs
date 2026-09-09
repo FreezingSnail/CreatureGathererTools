@@ -167,3 +167,65 @@ fn scripts_land_in_four_chunks() {
     assert!(text_bin.contains("North gate. You are in chunk one."));
     assert!(text_bin.contains("Sound the horn?"));
 }
+
+const WORLD_TILED: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/world_map.json");
+
+#[test]
+fn store_loads_canonical_and_tiled_map_sources() {
+    let canonical = Store::new(&fixture_cfg())
+        .load_map()
+        .expect("canonical fixture parses");
+    let mut cfg = fixture_cfg();
+    cfg.map_json = WORLD_TILED.to_string();
+    let tiled = Store::new(&cfg)
+        .load_map()
+        .expect("Tiled fixture parses through Store");
+
+    assert_eq!((canonical.width, canonical.height), (16, 8));
+    assert_eq!((tiled.width, tiled.height), (256, 256));
+    assert_eq!(tiled.npcs[0].script, "@test_house");
+    assert_eq!(tiled.npcs[0].x, 12);
+    assert_eq!(tiled.npcs[0].y, 7);
+}
+
+#[test]
+fn tiled_location_markers_resolve_without_becoming_scripts() {
+    let mut cfg = fixture_cfg();
+    cfg.map_json = TILED.to_string();
+    let mut map = Store::new(&cfg)
+        .load_map()
+        .expect("Tiled fixture parses through Store");
+    map.npcs = vec![
+        NPCObject { id: 7, x: 12, y: 7, sprite_id: 0, script: "@test_house".into() },
+        NPCObject { id: 9, x: 4, y: 4, sprite_id: 0, script: "@test_teleport".into() },
+    ];
+    map.scripts = vec![
+        ScriptObject { id: 1, x: 0, y: 4, script: "tp @test_teleport @test_house;".into() },
+        ScriptObject { id: 2, x: 8, y: 4, script: "tp @test_house @test_teleport;".into() },
+        ScriptObject { id: 3, x: 2, y: 2, script: "if flag_door then tp 1 1 0 0 endif;".into() },
+    ];
+    let artifacts = builder::build_map(&map).expect("location references resolve");
+
+    assert!(artifacts.locations_hpp.contains("test_house"));
+    assert!(artifacts.locations_hpp.contains("test_teleport"));
+    assert!(artifacts.scripts_hpp.contains("uint8_t blob0[]"));
+    assert!(artifacts.scripts_hpp.contains("uint8_t blob32[]"));
+    assert!(artifacts.scripts_hpp.contains("uint8_t blob33[]"));
+    assert!(artifacts.scripts_hpp.contains("// tp @test_teleport @test_house;"));
+    assert!(artifacts.scripts_hpp.contains("// tp @test_house @test_teleport;"));
+    assert!(artifacts.scripts_hpp.contains("// if flag_door then tp 1 1 0 0 endif;"));
+    assert_eq!(
+        &artifacts.scripts_bin[32 * 128..32 * 128 + 9],
+        &[4, 0, 4, 0, 4, 0, 12, 0, 7],
+        "tp @test_teleport @test_house resolves to both marker coordinates",
+    );
+    assert_eq!(
+        &artifacts.scripts_bin[33 * 128..33 * 128 + 9],
+        &[4, 0, 12, 0, 7, 0, 4, 0, 4],
+        "tp @test_house @test_teleport resolves to both marker coordinates",
+    );
+    for chunk in [0usize, 32, 33] {
+        assert!(artifacts.scripts_bin[chunk * 128..(chunk + 1) * 128]
+            .iter()
+            .any(|&byte| byte != 0));
+    }

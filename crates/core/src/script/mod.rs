@@ -250,8 +250,20 @@ fn parse_tp(
     locations: &HashMap<String, (u16, u16)>,
     controller: &mut Controller,
 ) -> Result<Cmd, ScriptError> {
-    let to = parse_location(lex, locations, controller)?;
-    Ok(Cmd::Tp { to })
+    let from_or_to = parse_location(lex, locations, controller)?;
+    // Existing Tiled maps use `tp from to` for the conditional two-location
+    // form. Preserve the one-location `tp to` form and emit TpIf whenever a
+    // second location immediately follows, matching the explicit `tpif` ABI.
+    let next_is_location = matches!(lex.clone().next()?.kind, TokenKind::At(_) | TokenKind::Number(_));
+    if next_is_location {
+        let to = parse_location(lex, locations, controller)?;
+        Ok(Cmd::TpIf {
+            from: from_or_to,
+            to,
+        })
+    } else {
+        Ok(Cmd::Tp { to: from_or_to })
+    }
 }
 
 fn parse_tpif(

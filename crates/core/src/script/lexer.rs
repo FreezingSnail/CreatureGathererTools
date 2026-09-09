@@ -39,6 +39,7 @@ impl Token {
 
 /// Stateful scanner over `src`. Call [`Lexer::next`] repeatedly; it returns
 /// [`TokenKind::Eof`] once the input is exhausted.
+#[derive(Debug, Clone)]
 pub struct Lexer {
     input: Vec<char>,
     pos: usize,
