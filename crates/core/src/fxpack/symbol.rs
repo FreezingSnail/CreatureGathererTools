@@ -14,7 +14,8 @@ pub fn extract_symbol_bytes(
     namespace: Option<&str>,
     offsets: &BTreeMap<String, u32>,
 ) -> anyhow::Result<Vec<u8>> {
-    let content = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    let content =
+        std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     parse_symbol_bytes(&content, symbol, namespace, offsets)
         .with_context(|| format!("extracting typed symbol {symbol:?} from {}", path.display()))
 }
@@ -40,7 +41,10 @@ pub fn parse_symbol_bytes(
             continue;
         };
         index += 1;
-        while matches!(tokens.get(index), Some(Token::Punct('[') | Token::Punct(']'))) {
+        while matches!(
+            tokens.get(index),
+            Some(Token::Punct('[') | Token::Punct(']'))
+        ) {
             index += 1;
         }
         let Some(name) = tokens.get(index).and_then(Token::as_ident) else {
@@ -86,7 +90,9 @@ fn encode_initializer(
                 depth += 1;
             }
             Token::Punct('}') => {
-                depth = depth.checked_sub(1).context("unbalanced typed initializer")?;
+                depth = depth
+                    .checked_sub(1)
+                    .context("unbalanced typed initializer")?;
                 if depth == 0 {
                     return Ok(bytes);
                 }
@@ -217,7 +223,8 @@ fn lex(input: &str) -> anyhow::Result<Vec<Token>> {
                 while index < bytes.len() && is_ident_continue(bytes[index]) {
                     index += 1;
                 }
-                let mut name = String::from_utf8(bytes[start..index].to_vec()).expect("ASCII identifier");
+                let mut name =
+                    String::from_utf8(bytes[start..index].to_vec()).expect("ASCII identifier");
                 while bytes.get(index..index + 2) == Some(b"::") {
                     index += 2;
                     let next = index;
@@ -229,27 +236,46 @@ fn lex(input: &str) -> anyhow::Result<Vec<Token>> {
                         index += 1;
                     }
                     name.push_str("::");
-                    name.push_str(std::str::from_utf8(&bytes[next..index]).expect("ASCII identifier"));
+                    name.push_str(
+                        std::str::from_utf8(&bytes[next..index]).expect("ASCII identifier"),
+                    );
                 }
                 tokens.push(Token::Ident(name));
             }
             b'0'..=b'9' => {
                 let start = index;
-                let binary = bytes.get(index..index + 2).is_some_and(|prefix| prefix == b"0b" || prefix == b"0B");
-                let hexadecimal = bytes.get(index..index + 2).is_some_and(|prefix| prefix == b"0x" || prefix == b"0X");
+                let binary = bytes
+                    .get(index..index + 2)
+                    .is_some_and(|prefix| prefix == b"0b" || prefix == b"0B");
+                let hexadecimal = bytes
+                    .get(index..index + 2)
+                    .is_some_and(|prefix| prefix == b"0x" || prefix == b"0X");
                 index += if binary || hexadecimal { 2 } else { 0 };
                 let digits = index;
                 while index < bytes.len()
-                    && if binary { matches!(bytes[index], b'0' | b'1') } else if hexadecimal { bytes[index].is_ascii_hexdigit() } else { bytes[index].is_ascii_digit() }
+                    && if binary {
+                        matches!(bytes[index], b'0' | b'1')
+                    } else if hexadecimal {
+                        bytes[index].is_ascii_hexdigit()
+                    } else {
+                        bytes[index].is_ascii_digit()
+                    }
                 {
                     index += 1;
                 }
                 if index == digits {
                     bail!("invalid numeric literal");
                 }
-                let literal = std::str::from_utf8(&bytes[start..index]).expect("ASCII numeric literal");
-                let value = if binary { u32::from_str_radix(&literal[2..], 2) } else if hexadecimal { u32::from_str_radix(&literal[2..], 16) } else { literal.parse() }
-                    .with_context(|| format!("parsing numeric literal {literal:?}"))?;
+                let literal =
+                    std::str::from_utf8(&bytes[start..index]).expect("ASCII numeric literal");
+                let value = if binary {
+                    u32::from_str_radix(&literal[2..], 2)
+                } else if hexadecimal {
+                    u32::from_str_radix(&literal[2..], 16)
+                } else {
+                    literal.parse()
+                }
+                .with_context(|| format!("parsing numeric literal {literal:?}"))?;
                 tokens.push(Token::Number(value));
             }
             byte @ (b'{' | b'}' | b'[' | b']' | b'=' | b',' | b';') => {
