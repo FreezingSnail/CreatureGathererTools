@@ -23,7 +23,18 @@ pub struct Config {
     pub fixture_dir: Option<String>,
     #[serde(default, rename = "fx_layout", skip_serializing_if = "Option::is_none")]
     pub fx_layout: Option<String>,
+    /// Project-level tile block library shared by the map editor and WFC.
+    /// Defaults to `blocks.json` beside the project manifest.
+    #[serde(
+        default,
+        rename = "blocks_json",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub blocks_json: Option<String>,
 }
+
+/// Blocks file used when a manifest does not name one.
+pub const DEFAULT_BLOCKS_FILE: &str = "blocks.json";
 
 impl Config {
     /// Mirrors Go `config.Load()`: reads "creature-tools.json" from the
@@ -58,6 +69,15 @@ impl Config {
         if let Some(fx_layout) = &mut self.fx_layout {
             resolve_relative_path(fx_layout, config_dir);
         }
+        // Fill the default here so every caller has a usable path without
+        // needing to know where the manifest lives.
+        let blocks = self
+            .blocks_json
+            .take()
+            .unwrap_or_else(|| DEFAULT_BLOCKS_FILE.to_string());
+        let mut blocks = blocks;
+        resolve_relative_path(&mut blocks, config_dir);
+        self.blocks_json = Some(blocks);
     }
 }
 
@@ -105,6 +125,44 @@ mod tests {
             Some(base.join("fixtures").to_string_lossy().into_owned())
         );
         assert_eq!(cfg.fx_layout, None);
+        assert_eq!(
+            cfg.blocks_json,
+            Some(base.join("blocks.json").to_string_lossy().into_owned()),
+            "blocks file defaults beside the manifest"
+        );
+    }
+
+    #[test]
+    fn explicit_blocks_path_is_resolved_from_manifest_dir() {
+        let directory = std::env::temp_dir().join(format!(
+            "cgfx-config-blocks-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&directory).expect("temp project dir");
+        let manifest = directory.join("cgfx-project.json");
+        std::fs::write(
+            &manifest,
+            r#"{"creatures_json":"c.json","moves_json":"m.json","map_json":"map.json",
+                "tileset_png":"t.png","map_tileset_png":"t.png","npc_tileset_png":"n.png",
+                "output_dir":"out","blocks_json":"data/json/blocks.json"}"#,
+        )
+        .expect("write manifest");
+
+        let cfg = Config::load_from(&manifest).expect("manifest must parse");
+
+        assert_eq!(
+            cfg.blocks_json,
+            Some(
+                directory
+                    .join("data/json/blocks.json")
+                    .to_string_lossy()
+                    .into_owned()
+            )
+        );
+        std::fs::remove_dir_all(&directory).ok();
     }
 
     #[test]

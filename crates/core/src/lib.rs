@@ -1,4 +1,5 @@
 pub mod arena;
+pub mod blocks;
 pub mod builder;
 pub mod cli;
 pub mod config;

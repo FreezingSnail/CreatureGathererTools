@@ -31,6 +31,7 @@ fn fixture_cfg() -> Config {
         output_dir: format!("{TD}/testdata/builder_out/map4chunks"),
         fixture_dir: None,
         fx_layout: None,
+        blocks_json: None,
     }
 }
 
@@ -229,3 +230,4 @@ fn tiled_location_markers_resolve_without_becoming_scripts() {
             .iter()
             .any(|&byte| byte != 0));
     }
+}

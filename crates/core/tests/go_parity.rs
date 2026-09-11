@@ -49,6 +49,7 @@ fn load_creatures() -> Vec<creaturevm::model::Creature> {
         output_dir: String::new(),
         fixture_dir: None,
         fx_layout: None,
+        blocks_json: None,
     };
     Store::new(&cfg)
         .load_creatures()
@@ -66,6 +67,7 @@ fn load_moves() -> Vec<creaturevm::model::Move> {
         output_dir: String::new(),
         fixture_dir: None,
         fx_layout: None,
+        blocks_json: None,
     };
     Store::new(&cfg).load_moves().expect("moves fixture parses")
 }

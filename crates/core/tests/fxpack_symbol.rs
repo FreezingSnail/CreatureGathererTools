@@ -2,9 +2,12 @@ use creaturevm::fxpack::symbol::parse_symbol_bytes;
 use std::collections::BTreeMap;
 
 fn offsets() -> BTreeMap<String, u32> {
-    [("Data::local".to_owned(), 0x001234), ("Global::value".to_owned(), 0x00abcd)]
-        .into_iter()
-        .collect()
+    [
+        ("Data::local".to_owned(), 0x001234),
+        ("Global::value".to_owned(), 0x00abcd),
+    ]
+    .into_iter()
+    .collect()
 }
 
 const FIXTURE: &str = include_str!("testdata/fxpack/symbol/data.txt");

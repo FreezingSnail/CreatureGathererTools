@@ -1,5 +1,6 @@
 //! JSON store for the canonical game-data files (map / creatures / moves),
 //! ported from creatureTools internal/store/store.go.
+use crate::blocks::BlockLibrary;
 use crate::config::Config;
 use crate::model::{Creature, GameMap, Move};
 use std::path::Path;
@@ -55,6 +56,39 @@ impl<'a> Store<'a> {
     pub fn save_map(&self, map: &GameMap) -> anyhow::Result<()> {
         save_json(&self.cfg.map_json, map)
     }
+
+    /// Loads the project block library. A project that has never saved blocks
+    /// has no file yet, which is an empty library rather than an error.
+    pub fn load_blocks(&self) -> anyhow::Result<BlockLibrary> {
+        let path = self.blocks_path()?;
+        if !Path::new(&path).exists() {
+            return Ok(BlockLibrary::default());
+        }
+        let library: BlockLibrary = load_json(&path)?;
+        library.validate().map_err(|errors| {
+            anyhow::anyhow!("invalid blocks file {path}: {}", errors.join("; "))
+        })?;
+        Ok(library)
+    }
+
+    pub fn save_blocks(&self, library: &BlockLibrary) -> anyhow::Result<()> {
+        library
+            .validate()
+            .map_err(|errors| anyhow::anyhow!("refusing to save blocks: {}", errors.join("; ")))?;
+        let path = self.blocks_path()?;
+        if let Some(parent) = Path::new(&path).parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| anyhow::anyhow!("creating {}: {e}", parent.display()))?;
+        }
+        save_json(&path, library)
+    }
+
+    fn blocks_path(&self) -> anyhow::Result<String> {
+        self.cfg
+            .blocks_json
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("project config has no blocks file path"))
+    }
 }
 
 fn load_json<T: serde::de::DeserializeOwned>(path: impl AsRef<Path>) -> anyhow::Result<T> {
@@ -95,6 +129,7 @@ mod tests {
             output_dir: String::new(),
             fixture_dir: None,
             fx_layout: None,
+            blocks_json: None,
         }
     }
 
@@ -231,6 +266,7 @@ mod tests {
             output_dir: String::new(),
             fixture_dir: None,
             fx_layout: None,
+            blocks_json: None,
         };
         let s = Store::new(&c);
         assert!(s.load_creatures().is_err(), "expected error");
@@ -258,6 +294,7 @@ mod tests {
             output_dir: String::new(),
             fixture_dir: None,
             fx_layout: None,
+            blocks_json: None,
         };
         let s = Store::new(&c);
         let m = s.load_map().expect("partial map must load like Go");
@@ -281,6 +318,7 @@ mod tests {
             output_dir: String::new(),
             fixture_dir: None,
             fx_layout: None,
+            blocks_json: None,
         };
         let s = Store::new(&c);
         assert!(s.load_map().is_err(), "expected error");
@@ -298,6 +336,82 @@ mod tests {
         s.save_map(&m).unwrap();
         let text = std::fs::read_to_string(&c.map_json).unwrap();
         assert!(text.contains("\n  \"width\":"), "expected 2-space indent");
+    }
+
+    fn blocks_cfg(name: &str) -> (Config, std::path::PathBuf) {
+        let directory = std::env::temp_dir().join(format!(
+            "cgfx-blocks-{name}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&directory).expect("temp blocks dir");
+        let mut c = cfg();
+        c.blocks_json = Some(directory.join("blocks.json").to_string_lossy().into_owned());
+        (c, directory)
+    }
+
+    #[test]
+    fn load_blocks_without_a_file_is_an_empty_library() {
+        let (c, directory) = blocks_cfg("missing");
+        let library = Store::new(&c)
+            .load_blocks()
+            .expect("absent blocks file must load as empty");
+        assert_eq!(library, crate::blocks::BlockLibrary::default());
+        std::fs::remove_dir_all(&directory).ok();
+    }
+
+    #[test]
+    fn roundtrip_blocks() {
+        let (c, directory) = blocks_cfg("roundtrip");
+        let store = Store::new(&c);
+        let library = crate::blocks::BlockLibrary::new(vec![crate::blocks::Block {
+            id: 1,
+            name: "hut".to_string(),
+            w: 2,
+            h: 2,
+            tiles: "4,5,6,7".to_string(),
+            tags: vec!["village".to_string()],
+        }]);
+        store.save_blocks(&library).expect("blocks must save");
+        assert_eq!(store.load_blocks().expect("blocks must reload"), library);
+        std::fs::remove_dir_all(&directory).ok();
+    }
+
+    #[test]
+    fn save_blocks_rejects_tile_payload_mismatch() {
+        let (c, directory) = blocks_cfg("invalid");
+        let library = crate::blocks::BlockLibrary::new(vec![crate::blocks::Block {
+            id: 1,
+            name: "bad".to_string(),
+            w: 2,
+            h: 2,
+            tiles: "4,5".to_string(),
+            tags: vec![],
+        }]);
+        let err = Store::new(&c)
+            .save_blocks(&library)
+            .expect_err("mismatched tiles must not be written");
+        assert!(err.to_string().contains("refusing to save blocks"));
+        std::fs::remove_dir_all(&directory).ok();
+    }
+
+    #[test]
+    fn save_blocks_creates_missing_parent_directories() {
+        let (mut c, directory) = blocks_cfg("nested");
+        c.blocks_json = Some(
+            directory
+                .join("data/json/blocks.json")
+                .to_string_lossy()
+                .into_owned(),
+        );
+        let store = Store::new(&c);
+        store
+            .save_blocks(&crate::blocks::BlockLibrary::new(vec![]))
+            .expect("nested blocks path must be created");
+        assert!(directory.join("data/json/blocks.json").is_file());
+        std::fs::remove_dir_all(&directory).ok();
     }
 
     #[test]
