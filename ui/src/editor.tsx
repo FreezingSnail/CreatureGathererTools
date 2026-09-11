@@ -12,8 +12,8 @@ import {
   type MutableRefObject,
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { Config, GameMap, ParseResult, CompileResult, TileRect, WfcProject, WfcPiece } from "./types";
-import { StampLibrary } from "./components/StampLibrary";
+import type { Block, Config, GameMap, ParseResult, CompileResult, TileRect, WfcProject, WfcPiece } from "./types";
+import { BlockPanel } from "./components/BlockPanel";
 import {
   initialState,
   reducer,
@@ -61,6 +61,9 @@ interface EditorProps {
   config: Config;
   map: GameMap;
   deps: EditorDeps;
+  /** Project block library, shared with the Blocks and WFC tabs. */
+  blocks?: Block[];
+  onBlocksChange?: (blocks: Block[]) => void;
   /** Gate global key handlers when the editor is hidden behind another tab. */
   active?: boolean;
   /** Shell can trigger the editor's own save (header Save map button). */
@@ -69,14 +72,19 @@ interface EditorProps {
 
 type PaletteTab = "map" | "npc" | "collision" | "encounter";
 
+const NO_BLOCKS: Block[] = [];
+
 export function MapEditor({
   config,
   map,
   deps,
+  blocks = NO_BLOCKS,
+  onBlocksChange,
   active = true,
   saveRef,
 }: EditorProps) {
   const [state, dispatch] = useReducer(reducer, undefined, initialState);
+  const [activeBlockId, setActiveBlockId] = useState<number | null>(null);
   const [mapTiles, setMapTiles] = useState<Tileset>(emptyTileset);
   const [npcTiles, setNpcTiles] = useState<Tileset>(emptyTileset);
   const [paletteTab, setPaletteTab] = useState<PaletteTab>("map");
@@ -376,12 +384,18 @@ export function MapEditor({
                 }}
                 emptyLabel="No map tileset loaded (set map_tileset_png)"
               />
-              <StampLibrary
+              <BlockPanel
+                blocks={blocks}
                 map={state.map}
                 tiles={mapTiles.tiles}
                 selection={state.selection}
-                onMapChange={(next) => dispatch({ type: "UPDATE_MAP", map: next })}
-                onSetClipboard={(clipboard) => dispatch({ type: "SET_CLIPBOARD", clipboard })}
+                activeBlockId={activeBlockId}
+                onBlocksChange={(next) => onBlocksChange?.(next)}
+                onUseBlock={(clipboard, block) => {
+                  setActiveBlockId(block.id);
+                  dispatch({ type: "SET_CLIPBOARD", clipboard });
+                  dispatch({ type: "SET_TOOL", tool: "paste" });
+                }}
               />
             </>
           )}

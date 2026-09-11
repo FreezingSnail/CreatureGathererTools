@@ -1,7 +1,7 @@
 // Tile palette: a scrollable grid of tilesets. Shift-click drag-selects a
 // row-major rectangle (Go buildPalette parity). Uses toDataURL so jsdom-safe.
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { selectRect } from "./geometry";
@@ -16,18 +16,61 @@ export interface PaletteProps {
   tilePx?: number;
   /** Pinch-zoom sensitivity coefficient (higher = snappier). */
   sensitivity?: number;
+  /** Distinguishes multiple palettes rendered in one view. */
+  testId?: string;
   onSelectBlock: (block: number[], w: number, h: number) => void;
+}
+
+let tileIndicesVisible = true;
+const tileIndexOverlayListeners = new Set<() => void>();
+
+function getTileIndicesVisible() {
+  return tileIndicesVisible;
+}
+
+function isTextEntryTarget(target: EventTarget | null) {
+  return target instanceof HTMLElement
+    && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
+}
+
+function onGlobalKeyDown(event: KeyboardEvent) {
+  if (
+    event.defaultPrevented
+    || event.key.toLowerCase() !== "n"
+    || event.altKey
+    || event.ctrlKey
+    || event.metaKey
+    || event.repeat
+    || event.isComposing
+    || isTextEntryTarget(event.target)
+  ) return;
+  event.preventDefault();
+  tileIndicesVisible = !tileIndicesVisible;
+  tileIndexOverlayListeners.forEach((listener) => listener());
+}
+
+function subscribeTileIndexOverlay(listener: () => void) {
+  tileIndexOverlayListeners.add(listener);
+  if (tileIndexOverlayListeners.size === 1) window.addEventListener("keydown", onGlobalKeyDown);
+  return () => {
+    tileIndexOverlayListeners.delete(listener);
+    if (tileIndexOverlayListeners.size === 0) window.removeEventListener("keydown", onGlobalKeyDown);
+  };
 }
 
 function TileButton({
   canvas,
   index,
   isSelected,
+  showIndex,
+  testId,
   onTap,
 }: {
   canvas: HTMLCanvasElement;
   index: number;
   isSelected: boolean;
+  showIndex: boolean;
+  testId: string;
   onTap: (shift: boolean) => void;
 }) {
   const url = useMemo(() => {
@@ -54,14 +97,16 @@ function TileButton({
         backgroundSize: "cover",
         imageRendering: "pixelated",
       }}
-      data-testid="palette-tile"
+      data-testid={testId}
     >
-      <span
-        className="pointer-events-none absolute left-0 top-0 z-10 bg-blue-500/60 px-0.5 text-[9px] font-semibold leading-tight text-white"
-        data-testid="palette-tile-index"
-      >
-        {index}
-      </span>
+      {showIndex && (
+        <span
+          className="pointer-events-none absolute left-0 top-0 z-10 bg-blue-500/60 px-0.5 text-[9px] font-semibold leading-tight text-white"
+          data-testid="palette-tile-index"
+        >
+          {index}
+        </span>
+      )}
     </Button>
   );
 }
@@ -73,6 +118,7 @@ export function Palette({
   emptyLabel = "No tileset loaded",
   tilePx = 48,
   sensitivity = 0.006,
+  testId = "palette",
   onSelectBlock,
 }: PaletteProps) {
   const anchorRef = useRef(0);
@@ -83,6 +129,11 @@ export function Palette({
   const zoomRef = useRef(1);
   const selectedSet = useMemo(() => new Set(selected), [selected]);
   const hasTiles = tiles.length > 0;
+  const showTileIndices = useSyncExternalStore(
+    subscribeTileIndexOverlay,
+    getTileIndicesVisible,
+    getTileIndicesVisible,
+  );
 
   // Pinch zoom: trackpads emit ctrl+wheel. Native listener so we can
   // preventDefault; plain wheel keeps default scroll behavior. Apply
@@ -109,7 +160,7 @@ export function Palette({
 
   if (tiles.length === 0) {
     return (
-      <div className="text-muted-foreground" style={{ padding: 8 }} data-testid="palette">
+      <div className="text-muted-foreground" style={{ padding: 8 }} data-testid={testId}>
         {emptyLabel}
       </div>
     );
@@ -141,7 +192,10 @@ export function Palette({
         gap: 2,
         padding: 4,
       }}
-      data-testid="palette"
+      data-testid={testId}
+      role="group"
+      aria-label={`Tile palette; tile numbers ${showTileIndices ? "shown" : "hidden"}. Press N anywhere outside text fields to toggle.`}
+      title={`Tile numbers ${showTileIndices ? "shown" : "hidden"}. Press N anywhere outside text fields to toggle.`}
     >
       {tiles.map((t, i) => (
         <TileButton
@@ -149,6 +203,8 @@ export function Palette({
           canvas={t}
           index={i}
           isSelected={selectedSet.has(i)}
+          showIndex={showTileIndices}
+          testId={`${testId}-tile`}
           onTap={(shift) => tap(i, shift)}
         />
       ))}

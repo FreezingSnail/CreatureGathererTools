@@ -10,6 +10,19 @@ export interface Config {
   npc_tileset_png: string;
   output_dir: string;
   fx_layout?: string;
+  blocks_json?: string;
+}
+
+/** Reusable tile rectangle from the project block library
+ * (crates/core/src/blocks.rs). */
+export interface Block {
+  id: number;
+  name: string;
+  w: number;
+  h: number;
+  /** Row-major tile ids, run-length encoded. */
+  tiles: string;
+  tags?: string[];
 }
 
 export interface NPCObject {

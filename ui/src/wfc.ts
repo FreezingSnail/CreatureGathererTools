@@ -1,4 +1,4 @@
-import type { EdgeSocket, Side, SocketLabel, SocketKind, WfcPiece, WfcProject } from "./types";
+import type { EdgeSocket, RuleSpec, Side, SocketLabel, SocketKind, WfcPiece, WfcProject } from "./types";
 import { decode } from "./rle";
 
 export const WFC_SIDES: readonly Side[] = ["n", "e", "s", "w"];
@@ -163,6 +163,27 @@ export function legalNeighbourCounts(project: WfcProject, piece: WfcPiece): Reco
 
 export function nextWfcId(values: { id: number }[]): number {
   return values.reduce((max, value) => Math.max(max, value.id), 0) + 1;
+}
+
+/** Remove pieces and every recipe reference that would otherwise dangle. */
+export function removeWfcPieces(project: WfcProject, removedIds: readonly number[]): WfcProject {
+  const removed = new Set(removedIds);
+  if (!removed.size) return project;
+  return {
+    ...project,
+    pieces: project.pieces.filter((piece) => !removed.has(piece.id)),
+    recipes: project.recipes.map((recipe) => ({
+      ...recipe,
+      piece_ids: recipe.piece_ids.filter((id) => !removed.has(id)),
+      anchors: recipe.anchors.filter((anchor) => !removed.has(anchor.piece_id)),
+      rules: recipe.rules?.flatMap((rule): RuleSpec[] => {
+        if (rule.kind === "count" || rule.kind === "band") return removed.has(rule.piece_id) ? [] : [rule];
+        if (rule.kind === "exclude") return removed.has(rule.a) || removed.has(rule.b) ? [] : [rule];
+        const piece_ids = rule.piece_ids.filter((id) => !removed.has(id));
+        return piece_ids.length ? [{ ...rule, piece_ids }] : [];
+      }),
+    })),
+  };
 }
 
 export function slotSizeMigrationOffenders(project: WfcProject, slotW: number, slotH: number): WfcPiece[] {

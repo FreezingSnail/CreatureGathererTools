@@ -2,14 +2,17 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import App from "./App";
 import { emptyMap } from "./state";
 import type { Config } from "./types";
 import type { Creature, Move } from "./editorTypes";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 
 const mockInvoke = vi.mocked(invoke) as unknown as ReturnType<typeof vi.fn>;
+const mockOpen = vi.mocked(open);
 
 const config: Config = {
   creatures_json: "creatures.json",
@@ -52,6 +55,7 @@ function mockBoot() {
   mockInvoke.mockImplementation((cmd: string) => {
     switch (cmd) {
       case "load_config":
+      case "load_project_config":
         return Promise.resolve(config);
       case "load_map":
         return Promise.resolve(map);
@@ -82,6 +86,7 @@ function mockBoot() {
 
 beforeEach(() => {
   mockInvoke.mockReset();
+  mockOpen.mockReset();
 });
 
 describe("App shell", () => {
@@ -89,7 +94,7 @@ describe("App shell", () => {
     const consoleError = vi.spyOn(console, "error");
     mockInvoke.mockImplementation((cmd: string) => {
       if (cmd === "load_config") return Promise.reject(new Error("missing creature-tools.json"));
-      if (cmd === "save_config") return Promise.resolve(null);
+      if (cmd === "save_config") return Promise.resolve(config);
       if (cmd === "load_map") return Promise.resolve(map);
       return Promise.reject(new Error(`unexpected invoke: ${cmd}`));
     });
@@ -97,18 +102,20 @@ describe("App shell", () => {
     render(<App />);
     expect(await screen.findByTestId("setup-dialog")).toBeInTheDocument();
 
+    await user.type(screen.getByLabelText("Project folder"), "/projects/one");
     await user.type(screen.getByLabelText("Creatures JSON"), "creatures.json");
     await user.type(screen.getByLabelText("Moves JSON"), "moves.json");
     await user.type(screen.getByLabelText("Map JSON"), "map.json");
     await user.type(screen.getByLabelText("Map Tileset PNG"), "map_tileset.png");
     await user.type(screen.getByLabelText("NPC Tileset PNG"), "npc_tileset.png");
     await user.type(screen.getByLabelText("Output Dir"), "out");
-    await user.click(screen.getByRole("button", { name: "Create Config" }));
+    await user.click(screen.getByRole("button", { name: "Create project" }));
 
     await waitFor(() =>
       expect(mockInvoke).toHaveBeenCalledWith(
         "save_config",
         expect.objectContaining({
+          projectDir: "/projects/one",
           config: expect.objectContaining({
             creatures_json: "creatures.json",
             moves_json: "moves.json",
@@ -127,6 +134,27 @@ describe("App shell", () => {
     consoleError.mockRestore();
   });
 
+  it("opens an existing project from the startup setup screen", async () => {
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "load_config") return Promise.reject(new Error("no project is open"));
+      if (cmd === "load_project_config") return Promise.resolve(config);
+      if (cmd === "load_map") return Promise.resolve(map);
+      return Promise.reject(new Error(`unexpected invoke: ${cmd}`));
+    });
+    mockOpen.mockResolvedValue("/Users/connorfranc/code/CreatureGathererFX/cgfx-project.json");
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByTestId("setup-dialog");
+
+    await user.click(screen.getByRole("button", { name: "Open existing project" }));
+    await waitFor(() =>
+      expect(mockInvoke).toHaveBeenCalledWith("load_project_config", {
+        projectPath: "/Users/connorfranc/code/CreatureGathererFX/cgfx-project.json",
+      })
+    );
+    expect(await screen.findByRole("tab", { name: "Map" })).toBeInTheDocument();
+  });
+
   it("shows a save failure error and keeps the setup dialog open", async () => {
     mockInvoke.mockImplementation((cmd: string) => {
       if (cmd === "load_config") return Promise.reject(new Error("missing creature-tools.json"));
@@ -135,7 +163,8 @@ describe("App shell", () => {
     });
     render(<App />);
     await screen.findByTestId("setup-dialog");
-    fireEvent.click(screen.getByRole("button", { name: "Create Config" }));
+    fireEvent.change(screen.getByLabelText("Project folder"), { target: { value: "/projects/one" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create project" }));
     expect(await screen.findByTestId("setup-error")).toHaveTextContent(/save failed/i);
     expect(screen.getByTestId("setup-dialog")).toBeInTheDocument();
   });
@@ -223,6 +252,25 @@ describe("App shell", () => {
     await waitFor(() =>
       expect(mockInvoke).toHaveBeenCalledWith("save_map", expect.objectContaining({ map: expect.anything() }))
     );
+  });
+
+  it("opens an existing project manifest selected from the native dialog", async () => {
+    mockBoot();
+    mockOpen.mockResolvedValue("/Users/connorfranc/code/CreatureGathererFX/cgfx-project.json");
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByTestId("palette");
+
+    await user.click(screen.getByRole("button", { name: "Open project" }));
+    await waitFor(() =>
+      expect(mockInvoke).toHaveBeenCalledWith("load_project_config", {
+        projectPath: "/Users/connorfranc/code/CreatureGathererFX/cgfx-project.json",
+      })
+    );
+    expect(mockOpen).toHaveBeenCalledWith(expect.objectContaining({
+      title: "Open project manifest",
+      filters: [{ name: "Project manifest", extensions: ["json"] }],
+    }));
   });
 
   it("header Compile all runs compile_all and surfaces artifacts", async () => {

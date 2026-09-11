@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { WfcPiece, WfcProject } from "./types";
-import { deriveEdgeStrips, extractThumbnailTiles, legalNeighbourCounts } from "./wfc";
+import { deriveEdgeStrips, extractThumbnailTiles, legalNeighbourCounts, removeWfcPieces } from "./wfc";
 
 const piece = (id: number, tiles: string, tw = 1, th = 1): WfcPiece => ({
   id, name: `piece ${id}`, tw, th, tiles, weight: 1, edge_overrides: [], tags: [],
@@ -29,3 +29,17 @@ describe("wfc helpers", () => {
     expect(legalNeighbourCounts(project, project.pieces[1])).toEqual({ n: [0], e: [0], s: [0], w: [0] });
   });
 });
+
+  it("removes pieces and sanitizes recipe references", () => {
+    const project: WfcProject = {
+      version: 1, slot_w: 1, slot_h: 1,
+      pieces: [piece(1, "1"), piece(2, "2")], socket_labels: [],
+      recipes: [{ id: 1, name: "test", piece_ids: [1, 2], size_w: 2, size_h: 2, seed: 1,
+        anchors: [{ piece_id: 1, sx: 0, sy: 0 }, { piece_id: 2, sx: 1, sy: 0 }], socket_compat: [],
+        rules: [{ kind: "count", piece_id: 1, min: 1, max: null }, { kind: "exclude", a: 1, b: 2, radius: 1 }, { kind: "border", piece_ids: [1, 2] }, { kind: "band", piece_id: 2, from_row: 0, to_row: 1 }] }],
+    };
+    const next = removeWfcPieces(project, [1, 2]);
+    expect(next.pieces).toEqual([]);
+    expect(next.recipes[0]).toMatchObject({ piece_ids: [], anchors: [], rules: [] });
+    expect(project.pieces).toHaveLength(2);
+  });

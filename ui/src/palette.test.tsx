@@ -40,6 +40,24 @@ describe("Palette", () => {
     expect(labels).toEqual(["0", "1", "2"]);
   });
 
+  it("toggles tile-number overlays globally with N", () => {
+    const tiles = [makeCanvas(), makeCanvas(), makeCanvas()];
+    render(
+      <>
+        <Palette tiles={tiles} perRow={3} selected={[]} testId="first-palette" onSelectBlock={() => {}} />
+        <Palette tiles={tiles} perRow={3} selected={[]} testId="second-palette" onSelectBlock={() => {}} />
+      </>
+    );
+
+    fireEvent.keyDown(window, { key: "n" });
+    expect(screen.queryAllByTestId("palette-tile-index")).toHaveLength(0);
+    expect(screen.getByTestId("first-palette")).toHaveAttribute("aria-label", expect.stringContaining("hidden"));
+    expect(screen.getByTestId("second-palette")).toHaveAttribute("aria-label", expect.stringContaining("hidden"));
+
+    fireEvent.keyDown(window, { key: "N" });
+    expect(screen.getAllByTestId("palette-tile-index")).toHaveLength(6);
+  });
+
   it("pinch zoom (ctrl+wheel) scales the grid; plain wheel does not", () => {
     const tiles = [makeCanvas(), makeCanvas(), makeCanvas(), makeCanvas()];
     render(<Palette tiles={tiles} perRow={2} selected={[]} onSelectBlock={() => {}} />);

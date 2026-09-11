@@ -5,11 +5,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import { MapEditor, type EditorDeps } from "./editor";
-import { CreatureEditor, LayoutView, MoveEditor, WfcTab } from "./components";
+import { BlocksTab, CreatureEditor, LayoutView, MoveEditor, WfcTab } from "./components";
 import { SetupDialog } from "./SetupDialog";
 import { emptyMap } from "./state";
-import type { Config, GameMap, CompileResult, ParseResult } from "./types";
+import { emptyTileset, loadMapTileset, type Tileset } from "./tileset";
+import type { Block, Config, GameMap, CompileResult, ParseResult } from "./types";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "./components/ui/tabs";
 import { Button } from "./components/ui/button";
 import { Alert } from "./components/ui/alert";
@@ -18,10 +20,11 @@ import { Card, CardContent } from "./components/ui/card";
 const readBytes = async (path: string): Promise<Uint8Array> =>
   new Uint8Array(await invoke<number[]>("read_file_bytes", { path }));
 
-type TabId = "map" | "creature" | "move" | "layout" | "wfc";
+type TabId = "map" | "blocks" | "creature" | "move" | "layout" | "wfc";
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "map", label: "Map" },
+  { id: "blocks", label: "Blocks" },
   { id: "creature", label: "Creature" },
   { id: "move", label: "Move" },
   { id: "layout", label: "Layout" },
@@ -29,6 +32,8 @@ const TABS: { id: TabId; label: string }[] = [
 ];
 
 type Phase = "checking" | "setup" | "editors";
+
+type BlocksSaveState = "idle" | "saving" | "saved" | "error";
 
 const emptyConfig = (): Config => ({
   creatures_json: "",
@@ -52,7 +57,26 @@ function App() {
     error: boolean;
   } | null>(null);
   const [compileResult, setCompileResult] = useState<CompileResult | null>(null);
+  const [blocks, setBlocks] = useState<Block[]>([]);
+  const [blocksSave, setBlocksSave] = useState<BlocksSaveState>("idle");
+  const [blocksError, setBlocksError] = useState<string | null>(null);
+  const [sheet, setSheet] = useState<Tileset>(emptyTileset);
   const mapSaveRef = useRef<(() => void) | null>(null);
+
+  // Blocks are project data, so every library edit is written straight to the
+  // project blocks file; the tab surfaces the outcome.
+  const changeBlocks = useCallback(async (next: Block[]) => {
+    setBlocks(next);
+    setBlocksSave("saving");
+    try {
+      await invoke("save_blocks", { blocks: next });
+      setBlocksSave("saved");
+      setBlocksError(null);
+    } catch (e) {
+      setBlocksSave("error");
+      setBlocksError(String(e));
+    }
+  }, []);
 
   const deps = useMemo<EditorDeps>(
     () => ({
@@ -65,6 +89,19 @@ function App() {
   );
 
   // Load config + map on mount. Missing config (load_config error) → setup.
+  const loadProjectAssets = useCallback(async (cfg: Config) => {
+    try {
+      setBlocks((await invoke<Block[]>("load_blocks")) ?? []);
+      setBlocksSave("idle");
+      setBlocksError(null);
+    } catch (e) {
+      setBlocks([]);
+      setBlocksSave("error");
+      setBlocksError(String(e));
+    }
+    setSheet(await loadMapTileset(readBytes, cfg.map_tileset_png, cfg.tileset_png));
+  }, []);
+
   const boot = useCallback(async () => {
     setSetupError(null);
     try {
@@ -83,6 +120,7 @@ function App() {
       setConfig(cfg);
       setMap(m);
       setPhase("editors");
+      void loadProjectAssets(cfg);
     } catch (e) {
       setSetupError(String(e));
       setPhase("setup");
@@ -94,27 +132,56 @@ function App() {
     boot();
   }, [boot]);
 
-  const submitSetup = async (cfg: Config) => {
+  const activateProject = async (cfg: Config) => {
+    let m: GameMap;
+    try {
+      m = await invoke<GameMap>("load_map");
+      setHeaderStatus(null);
+    } catch (mapErr) {
+      m = emptyMap(16, 16);
+      setHeaderStatus({
+        text: `map failed to load, editing empty: ${String(mapErr)}`,
+        error: true,
+      });
+    }
+    setConfig(cfg);
+    setMap(m);
+    setBootKey((k) => k + 1);
+    setPhase("editors");
+    void loadProjectAssets(cfg);
+  };
+
+  const submitSetup = async (cfg: Config, projectDir: string) => {
     setSetupError(null);
     try {
-      await invoke("save_config", { config: cfg });
-      let m: GameMap;
-      try {
-        m = await invoke<GameMap>("load_map");
-        setHeaderStatus(null);
-      } catch (mapErr) {
-        m = emptyMap(16, 16);
-        setHeaderStatus({
-          text: `map failed to load, editing empty: ${String(mapErr)}`,
-          error: true,
-        });
-      }
-      setConfig(cfg);
-      setMap(m);
-      setBootKey((k) => k + 1);
-      setPhase("editors");
+      const saved = await invoke<Config>("save_config", { config: cfg, projectDir });
+      await activateProject(saved);
     } catch (e) {
       setSetupError(`save failed: ${String(e)}`);
+    }
+  };
+
+  const openProject = async (projectPath: string) => {
+    setSetupError(null);
+    try {
+      const cfg = await invoke<Config>("load_project_config", { projectPath });
+      await activateProject(cfg);
+    } catch (e) {
+      setSetupError(String(e));
+      setPhase("setup");
+    }
+  };
+
+  const chooseProject = async () => {
+    try {
+      const selected = await open({
+        multiple: false,
+        title: "Open project manifest",
+        filters: [{ name: "Project manifest", extensions: ["json"] }],
+      });
+      if (typeof selected === "string") await openProject(selected);
+    } catch (e) {
+      setHeaderStatus({ text: `project selection failed: ${String(e)}`, error: true });
     }
   };
 
@@ -122,20 +189,7 @@ function App() {
     setHeaderStatus(null);
     setCompileResult(null);
     try {
-      const cfg = await invoke<Config>("load_config");
-      let m: GameMap;
-      try {
-        m = await invoke<GameMap>("load_map");
-      } catch (mapErr) {
-        m = emptyMap(16, 16);
-        setHeaderStatus({
-          text: `map failed to load, editing empty: ${String(mapErr)}`,
-          error: true,
-        });
-      }
-      setConfig(cfg);
-      setMap(m);
-      setBootKey((k) => k + 1);
+      await activateProject(await invoke<Config>("load_config"));
     } catch (e) {
       setSetupError(String(e));
       setPhase("setup");
@@ -183,7 +237,12 @@ function App() {
   if (phase === "setup") {
     return (
       <>
-        <SetupDialog initial={config ?? emptyConfig()} error={setupError ?? undefined} onSubmit={submitSetup} />
+        <SetupDialog
+          initial={config ?? emptyConfig()}
+          error={setupError ?? undefined}
+          onSubmit={submitSetup}
+          onOpenProject={openProject}
+        />
       </>
     );
   }
@@ -212,6 +271,12 @@ function App() {
             </Button>
             <Button size="sm" variant="outline" onClick={compileAll}>
               Compile all
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => void chooseProject()}>
+              Open project
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => { setSetupError(null); setConfig(null); setPhase("setup"); }}>
+              New project
             </Button>
             <Button size="sm" variant="outline" onClick={reloadConfig}>
               Reload config
@@ -274,10 +339,30 @@ function App() {
                 config={config}
                 map={map}
                 deps={deps}
+                blocks={blocks}
+                onBlocksChange={(next) => void changeBlocks(next)}
                 active={tab === "map"}
                 saveRef={mapSaveRef}
               />
             )}
+          </TabsContent>
+          <TabsContent
+            value="blocks"
+            forceMount
+            id="tab-panel-blocks"
+            data-testid="tab-panel-blocks"
+            aria-label="blocks"
+            className="min-h-0 flex-1"
+          >
+            <BlocksTab
+              key={bootKey}
+              blocks={blocks}
+              tiles={sheet.tiles}
+              perRow={sheet.perRow}
+              onBlocksChange={(next) => void changeBlocks(next)}
+              saveState={blocksSave}
+              saveError={blocksError}
+            />
           </TabsContent>
           <TabsContent
             value="creature"
@@ -322,6 +407,9 @@ function App() {
                 key={bootKey}
                 config={config}
                 map={map}
+                blocks={blocks}
+                tiles={sheet.tiles}
+                perRow={sheet.perRow}
                 onMapChange={setMap}
                 saveMap={saveWfcMap}
               />
