@@ -157,10 +157,11 @@ Four layers, dependency direction `ui → src-tauri → crates/core → crates/w
 React 18 + TypeScript + Vite + Tailwind v4 + shadcn/ui (Radix) primitives. Runs as
 the Tauri webview.
 
-- Tab shell (`App.tsx`): Map / Creature / Move / Layout / WFC views stay mounted; inactive tabs
+- Tab shell (`App.tsx`): Map / Blocks / Creature / Move / Layout / WFC views stay mounted; inactive tabs
   are hidden via CSS to preserve per-view state. First-run SetupDialog for config.
   Editors remount only on config reload through `bootKey`.
-- `editor.tsx` — map canvas editor (tile painting, palette, layers) plus tile-stamp paste and WFC-piece capture.
+- `editor.tsx` — map canvas editor (tile painting, palette, layers) plus block paste brushes and map-selection block capture.
+- `components/BlocksTab.tsx`, `components/BlockPanel.tsx`, `components/BlockThumbnail.tsx` — project block library authoring (sprite-sheet brush + paint canvas), map-editor block brush, shared previews. Blocks persist through `load_blocks`/`save_blocks` in a project-level blocks file, not in the map.
 - `components/CreatureEditor.tsx`, `components/MoveEditor.tsx` — stat/field editors.
 - `components/WfcTab.tsx`, `components/RecipePanel.tsx` — WFC piece, socket, recipe, anchor, preview, rule, and stamp authoring; the ephemeral six-entry hunk history tray stays in component state.
 - `scriptPane.tsx` — script source editing with parse feedback from the backend.

@@ -6,9 +6,10 @@ Authoring toolchain for **CreatureGathererFX**, an Arduboy FX demake and creatur
 
 ## Features
 
-- **Desktop UI** (Tauri 2 + React + Tailwind v4 + shadcn/ui) with five tabbed views — Map, Creature, Move, Layout, WFC — that stay mounted to preserve per-view state.
-- **Map editor**: tile painting, layers, palette with resizable sprite sheet + pinch zoom, pan/paint tools, gesture pan/pinch zoom, double-click script edit.
-- **WFC hunk authoring**: capture slot-aligned tile pieces, assign derived or named sockets, build recipes with anchors and count/exclude/border/band rules, preview/reroll deterministic hunks, compare the six-entry hunk history tray, and save selected hunks to the tile stamp library for map-editor paste.
+- **Desktop UI** (Tauri 2 + React + Tailwind v4 + shadcn/ui) with six tabbed views — Map, Blocks, Creature, Move, Layout, WFC — that stay mounted to preserve per-view state.
+- **Map editor**: tile painting, layers, palette with resizable sprite sheet + pinch zoom, pan/paint tools, gesture pan/pinch zoom, double-click script edit, project blocks as paste brushes.
+- **Block library**: paint reusable tile blocks from the project sprite sheet in the Blocks tab, save them in a project-level `blocks.json`, then use them as a map-editor brush or import them as WFC pieces. Map selections can be captured as blocks directly from the editor.
+- **WFC hunk authoring**: import blocks (or per-tile fill pieces) as slot-aligned WFC pieces, assign derived or named sockets, build recipes with anchors and count/exclude/border/band rules, preview/reroll deterministic hunks, compare the six-entry hunk history tray, and save selected hunks to the tile stamp library for map-editor paste.
 - **Script pane**: live parse feedback (line/col errors, opcode preview) for the in-game script language (branches, counters, locations, commands).
 - **Layout view**: graphical FX memory map of everything being packed — 256-byte page strips per section (canvas, colored by group, hover for name/hex address/length/kind), namespace size bars with byte shares, alignment padding surfaced as its own quantity, and a sortable/filterable field table with page spans and image `WxH×frames`. Data and save sections are drawn as separate address spaces. Needs the builder `.bin` files, so run **Compile all** first.
 - **Deterministic compilation** of maps, creatures, and moves into C headers + binary blobs, byte-parity with the reference Go implementation (integration tests assert zero discrepancy).
@@ -21,11 +22,13 @@ Four layers, dependency direction `ui → src-tauri → crates/core → crates/w
 
 ### 1. React frontend — `ui/`
 
-React 18 + TypeScript + Vite + Tailwind v4 + shadcn/ui (Radix) primitives. Talks to the backend exclusively via `@tauri-apps/api` `invoke()` — never touches the filesystem directly. The WFC tab authors project-level slots, pieces, socket labels, recipes and anchors; it generates preview hunks and saves their tile payloads as map stamps. Pure logic extracted for unit testing: `state.ts`, `geometry.ts`, `tileset.ts`, `layoutModel.ts`, `wfc.ts`, `lib/validation.ts`.
+React 18 + TypeScript + Vite + Tailwind v4 + shadcn/ui (Radix) primitives. Talks to the backend exclusively via `@tauri-apps/api` `invoke()` — never touches the filesystem directly. The Blocks tab authors the project block library; the map editor consumes blocks as paste brushes and can capture map selections as blocks; the WFC tab imports blocks as pieces and authors project-level slots, sockets, recipes and anchors, generating preview hunks it can save as map stamps. Pure logic extracted for unit testing: `state.ts`, `geometry.ts`, `tileset.ts`, `layoutModel.ts`, `tileGrid.ts`, `blocks.ts`, `wfcImport.ts`, `wfc.ts`, `lib/validation.ts`.
 
 ### 2. Tauri 2 shell — `src-tauri/` (crate `cgfx-app`, lib `cgfx_app_lib`)
 
-Thin IPC layer over the core library. Every `#[tauri::command]` returns a serializable value or `Result<_, String>` — no panics across IPC, no `clap` here. Commands wrap `creaturevm` (cgfx-core): `load_config`/`save_config`, `load_map`/`save_map`, `load_creatures`/`save_creatures`, `load_moves`/`save_moves`, `compile_map`, `compile_all`, `layout_report`, `parse_script`, `read_file_bytes`, `capture_piece`, `wfc_generate`, `wfc_validate`, `tiled_import_path(path, current)`, `tiled_export_path`.
+Thin IPC layer over the core library. Every `#[tauri::command]` returns a serializable value or `Result<_, String>` — no panics across IPC, no `clap` here. Commands wrap `creaturevm` (cgfx-core): `load_config`/`save_config`, `load_map`/`save_map`, `load_blocks`/`save_blocks`, `load_creatures`/`save_creatures`, `load_moves`/`save_moves`, `compile_map`, `compile_all`, `layout_report`, `parse_script`, `read_file_bytes`, `capture_piece`, `wfc_generate`, `wfc_validate`, `tiled_import_path(path, current)`, `tiled_export_path`.
+
+`load_blocks`/`save_blocks` read and write the project block library (`crates/core/src/blocks.rs`). Its path comes from the optional manifest key `blocks_json`, defaulting to `blocks.json` beside the manifest; a project with no blocks file yet loads as an empty library, and saves create missing parent directories. Blocks live outside the map on purpose: one library serves every map, the map editor brush, and WFC piece import.
 
 `capture_piece` returns a slot-aligned `WfcPiece`; `wfc_generate` returns an in-memory hunk; `wfc_validate` returns validation messages. Tiled has no WFC or stamp representation, so `tiled_import_path` accepts the open map and preserves its `wfc` project and `stamps` while importing Tiled data.
 
