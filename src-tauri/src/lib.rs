@@ -8,6 +8,7 @@ use std::fmt::Display;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+use creaturevm::blocks::{Block, BlockLibrary};
 use creaturevm::builder;
 use creaturevm::config::Config;
 use creaturevm::fxpack::{
@@ -29,7 +30,7 @@ use tauri::{Manager, State};
 /// Runtime state managed by the app. Store borrows Config, so stores are
 /// constructed per operation from the locked config.
 struct AppState {
-    config: Config,
+    config: Option<Config>,
 }
 
 fn err_str<E: Display>(e: E) -> String {
@@ -259,28 +260,80 @@ fn layout_report_impl(cfg: &Config) -> Result<LayoutReport, String> {
 #[tauri::command]
 fn layout_report(state: State<Mutex<AppState>>) -> Result<LayoutReport, String> {
     let st = state.lock().map_err(err_str)?;
-    layout_report_impl(&st.config)
+    let config = st
+        .config
+        .as_ref()
+        .ok_or_else(|| "no project is open; choose a project folder".to_string())?;
+    layout_report_impl(config)
 }
 
 // ─────────────────────────────────────────────────────────────────────
 // Config
 // ─────────────────────────────────────────────────────────────────────
 
-#[tauri::command]
-fn load_config(state: State<Mutex<AppState>>) -> Result<Config, String> {
-    let st = state.lock().map_err(err_str)?;
-    Ok(st.config.clone())
+const PROJECT_CONFIG_FILE: &str = "creature-tools.json";
+
+/// Returns the fixed config filename within an existing project directory.
+fn project_config_path(project_dir: &str) -> Result<PathBuf, String> {
+    let directory = PathBuf::from(project_dir);
+    if !directory.is_dir() {
+        return Err(format!(
+            "project folder does not exist or is not a directory: {project_dir}"
+        ));
+    }
+    Ok(directory.join(PROJECT_CONFIG_FILE))
+}
+
+/// Loads an existing project manifest and resolves its relative paths from
+/// that file’s directory, independent of its filename.
+fn load_project_config_impl(project_path: &str) -> Result<Config, String> {
+    let path = PathBuf::from(project_path);
+    if !path.is_file() {
+        return Err(format!(
+            "project manifest does not exist or is not a file: {project_path}"
+        ));
+    }
+    Config::load_from(path).map_err(err_str)
+}
+
+/// Writes the portable project config, then reloads it so relative paths resolve
+/// against the selected folder before any editor/store operation uses it.
+fn save_project_config_impl(config: &Config, project_dir: &str) -> Result<Config, String> {
+    let path = project_config_path(project_dir)?;
+    let json = serde_json::to_string_pretty(config).map_err(err_str)?;
+    std::fs::write(&path, json).map_err(err_str)?;
+    Config::load_from(path).map_err(err_str)
 }
 
 #[tauri::command]
-fn save_config(state: State<Mutex<AppState>>, config: Config) -> Result<(), String> {
-    // Persist to creature-tools.json (same path Config::load reads) so the
-    // saved config survives restarts.
-    let json = serde_json::to_string_pretty(&config).map_err(err_str)?;
-    std::fs::write("creature-tools.json", json).map_err(err_str)?;
-    let mut st = state.lock().map_err(err_str)?;
-    st.config = config;
-    Ok(())
+fn load_config(state: State<Mutex<AppState>>) -> Result<Config, String> {
+    state
+        .lock()
+        .map_err(err_str)?
+        .config
+        .clone()
+        .ok_or_else(|| "no project is open; choose a project folder".to_string())
+}
+
+#[tauri::command]
+fn load_project_config(
+    state: State<Mutex<AppState>>,
+    project_path: String,
+) -> Result<Config, String> {
+    let config = load_project_config_impl(&project_path)?;
+    state.lock().map_err(err_str)?.config = Some(config.clone());
+    Ok(config)
+}
+
+#[tauri::command]
+fn save_config(
+    state: State<Mutex<AppState>>,
+    config: Config,
+    project_dir: String,
+) -> Result<Config, String> {
+    let config = save_project_config_impl(&config, &project_dir)?;
+    state.lock().map_err(err_str)?.config = Some(config.clone());
+    Ok(config)
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -294,7 +347,11 @@ fn with_store<T>(
     f: impl FnOnce(&Store) -> anyhow::Result<T>,
 ) -> Result<T, String> {
     let st = state.lock().map_err(err_str)?;
-    let store = Store::new(&st.config);
+    let config = st
+        .config
+        .as_ref()
+        .ok_or_else(|| "no project is open; choose a project folder".to_string())?;
+    let store = Store::new(config);
     f(&store).map_err(err_str)
 }
 
@@ -308,11 +365,21 @@ fn save_map(state: State<Mutex<AppState>>, map: GameMap) -> Result<(), String> {
     with_store(&state, |s| s.save_map(&map))
 }
 
+/// Returns the project block library shared by the map editor and WFC tools.
+#[tauri::command]
+fn load_blocks(state: State<Mutex<AppState>>) -> Result<Vec<Block>, String> {
+    with_store(&state, |s| s.load_blocks()).map(|library| library.blocks)
+}
+
+#[tauri::command]
+fn save_blocks(state: State<Mutex<AppState>>, blocks: Vec<Block>) -> Result<(), String> {
+    with_store(&state, |s| s.save_blocks(&BlockLibrary::new(blocks)))
+}
+
 #[tauri::command]
 fn load_creatures(state: State<Mutex<AppState>>) -> Result<Vec<Creature>, String> {
     with_store(&state, |s| s.load_creatures())
 }
-
 #[tauri::command]
 fn save_creatures(state: State<Mutex<AppState>>, creatures: Vec<Creature>) -> Result<(), String> {
     with_store(&state, |s| s.save_creatures(&creatures))
@@ -437,7 +504,17 @@ fn compile_map(state: State<Mutex<AppState>>) -> CompileResult {
             };
         }
     };
-    compile_map_impl(&st.config)
+    let Some(config) = st.config.as_ref() else {
+        return CompileResult {
+            ok: false,
+            errors: vec![CompileError {
+                line: 0,
+                msg: "no project is open; choose a project folder".into(),
+            }],
+            artifacts: vec![],
+        };
+    };
+    compile_map_impl(config)
 }
 
 /// Compile map + creatures + moves. Attempts each independently and
@@ -457,7 +534,16 @@ fn compile_all(state: State<Mutex<AppState>>) -> CompileResult {
             };
         }
     };
-    let cfg = &st.config;
+    let Some(cfg) = st.config.as_ref() else {
+        return CompileResult {
+            ok: false,
+            errors: vec![CompileError {
+                line: 0,
+                msg: "no project is open; choose a project folder".into(),
+            }],
+            artifacts: vec![],
+        };
+    };
 
     let mut result = CompileResult {
         ok: true,
@@ -634,22 +720,6 @@ fn tiled_export_path(map: GameMap, path: String) -> Result<(), String> {
 // App entry point
 // ─────────────────────────────────────────────────────────────────────
 
-/// Fallback config for a machine with no `creature-tools.json` yet; all
-/// paths empty so the UI can drive config save first.
-fn default_config() -> Config {
-    Config {
-        creatures_json: String::new(),
-        moves_json: String::new(),
-        map_json: String::new(),
-        tileset_png: String::new(),
-        map_tileset_png: String::new(),
-        npc_tileset_png: String::new(),
-        output_dir: String::new(),
-        fixture_dir: None,
-        fx_layout: None,
-    }
-}
-
 #[tauri::command]
 fn ping() -> String {
     "pong".into()
@@ -669,18 +739,24 @@ fn read_file_bytes(path: String) -> Result<Vec<u8>, String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            let config = Config::load().unwrap_or_else(|_| default_config());
-            app.manage(Mutex::new(AppState { config }));
+            // Preserve development/legacy launches from a project directory.
+            app.manage(Mutex::new(AppState {
+                config: Config::load().ok(),
+            }));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             ping,
             load_config,
+            load_project_config,
             save_config,
             load_map,
             save_map,
+            load_blocks,
+            save_blocks,
             load_creatures,
             save_creatures,
             load_moves,
@@ -709,6 +785,98 @@ mod tests {
     use super::*;
     use creaturevm::processor::ast::{Text, ToBytecode};
     use creaturevm::wfcmap::{EdgeSocket, Side, SocketKind, SocketLabel, Stamp, WfcRecipe};
+
+    /// The block library is project data, so it must survive a save/load cycle
+    /// through the path the manifest resolves, not through the open map.
+    #[test]
+    fn blocks_round_trip_through_the_project_blocks_file() {
+        let directory = std::env::temp_dir().join(format!(
+            "cgfx-blocks-ipc-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&directory).expect("temp project dir");
+        let manifest = directory.join("cgfx-project.json");
+        std::fs::write(
+            &manifest,
+            r#"{"creatures_json":"c.json","moves_json":"m.json","map_json":"map.json",
+                "tileset_png":"t.png","map_tileset_png":"t.png","npc_tileset_png":"n.png",
+                "output_dir":"out"}"#,
+        )
+        .expect("write manifest");
+        let config = load_project_config_impl(manifest.to_str().expect("utf8 path"))
+            .expect("manifest must load");
+        let store = Store::new(&config);
+
+        assert!(
+            store
+                .load_blocks()
+                .expect("empty library")
+                .blocks
+                .is_empty(),
+            "a project without a blocks file starts empty"
+        );
+
+        let blocks = vec![Block {
+            id: 1,
+            name: "hut".to_string(),
+            w: 2,
+            h: 2,
+            tiles: "4,5,6,7".to_string(),
+            tags: vec!["village".to_string()],
+        }];
+        store
+            .save_blocks(&BlockLibrary::new(blocks.clone()))
+            .expect("blocks must save");
+
+        assert!(directory.join("blocks.json").is_file());
+        assert_eq!(store.load_blocks().expect("reload").blocks, blocks);
+        std::fs::remove_dir_all(&directory).ok();
+    }
+
+    #[test]
+    fn project_config_is_created_and_loaded_from_manifest_file() {
+        let directory = std::env::temp_dir().join(format!(
+            "cgfx-project-config-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock after epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&directory).expect("create test project folder");
+        let config = Config {
+            creatures_json: "data/creatures.json".into(),
+            moves_json: "data/moves.json".into(),
+            map_json: "data/map.json".into(),
+            tileset_png: "assets/tiles.png".into(),
+            map_tileset_png: "assets/map.png".into(),
+            npc_tileset_png: "assets/npc.png".into(),
+            output_dir: "out".into(),
+            fixture_dir: None,
+            fx_layout: None,
+            blocks_json: None,
+        };
+
+        let loaded = save_project_config_impl(&config, &directory.to_string_lossy())
+            .expect("save selected project config");
+        assert!(directory.join(PROJECT_CONFIG_FILE).is_file());
+        assert_eq!(
+            loaded.map_json,
+            directory.join("data/map.json").to_string_lossy()
+        );
+        let manifest = directory.join("current-data.json");
+        std::fs::rename(directory.join(PROJECT_CONFIG_FILE), &manifest)
+            .expect("rename manifest without changing its content");
+        assert_eq!(
+            load_project_config_impl(&manifest.to_string_lossy())
+                .expect("load selected project manifest")
+                .output_dir,
+            directory.join("out").to_string_lossy()
+        );
+        std::fs::remove_dir_all(directory).expect("remove test project folder");
+    }
 
     #[test]
     fn parse_script_valid_reports_cmd_json() {
@@ -814,6 +982,7 @@ mod tests {
             output_dir: "out".into(),
             fixture_dir: None,
             fx_layout: None,
+            blocks_json: None,
         };
         let paths = artifact_paths(&cfg, &MAP_ARTIFACTS);
         assert_eq!(paths.len(), 9);
@@ -833,6 +1002,7 @@ mod tests {
             output_dir: "out".into(),
             fixture_dir: None,
             fx_layout: None,
+            blocks_json: None,
         };
         let r = compile_map_impl(&cfg);
         assert!(!r.ok);
@@ -909,6 +1079,7 @@ mod tests {
             output_dir: output_dir.to_string_lossy().into_owned(),
             fixture_dir: None,
             fx_layout: fx_layout.map(|path| path.to_string_lossy().into_owned()),
+            blocks_json: None,
         }
     }
 
