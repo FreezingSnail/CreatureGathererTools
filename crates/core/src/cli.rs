@@ -27,6 +27,7 @@ pub struct Cli {
             "type_table_csv",
             "type_table_output",
             "sprite_config",
+            "bw_placeholders",
             "assert_layout_equivalent"
         ]
     )]
@@ -46,7 +47,8 @@ pub struct Cli {
             "arena_output",
             "type_table_csv",
             "type_table_output",
-            "sprite_config"
+            "sprite_config",
+            "bw_placeholders"
         ]
     )]
     pub assert_layout_equivalent: Option<Vec<PathBuf>>,
@@ -57,6 +59,7 @@ pub struct Cli {
         "arena_csv",
         "type_table_csv",
         "sprite_config",
+        "bw_placeholders",
         "assert_layout_equivalent"
     ])]
     pub input: Option<PathBuf>,
@@ -67,6 +70,7 @@ pub struct Cli {
         "arena_csv",
         "type_table_csv",
         "sprite_config",
+        "bw_placeholders",
         "assert_layout_equivalent"
     ])]
     pub output: Option<PathBuf>,
@@ -89,8 +93,56 @@ pub struct Cli {
     #[arg(long, value_name = "CSV", conflicts_with_all = ["input", "opponents_csv", "arena_csv"])]
     pub type_table_csv: Option<PathBuf>,
     /// Emit legacy-compatible sprite C arrays from a native TOML source config.
-    #[arg(long, value_name = "FILE", conflicts_with_all = ["input", "output", "project", "opponents_csv", "arena_csv", "type_table_csv"])]
+    #[arg(long, value_name = "FILE", conflicts_with_all = ["input", "output", "project", "opponents_csv", "arena_csv", "type_table_csv", "bw_placeholders"])]
     pub sprite_config: Option<PathBuf>,
+    /// Rewrite referenced PNGs as black/white RGBA8 placeholders after archiving originals.
+    #[arg(
+        long,
+        value_name = "FILE",
+        requires = "archive_dir",
+        conflicts_with_all = [
+            "project",
+            "input",
+            "output",
+            "opponents_csv",
+            "opponents_output",
+            "arena_csv",
+            "arena_output",
+            "type_table_csv",
+            "type_table_output",
+            "sprite_config",
+            "assert_layout_equivalent",
+            "parity",
+            "emit_fixtures",
+            "pack",
+            "layout"
+        ]
+    )]
+    pub bw_placeholders: Option<PathBuf>,
+    /// Directory receiving immutable byte-for-byte copies before placeholder conversion.
+    #[arg(
+        long,
+        value_name = "DIR",
+        requires = "bw_placeholders",
+        conflicts_with_all = [
+            "project",
+            "input",
+            "output",
+            "opponents_csv",
+            "opponents_output",
+            "arena_csv",
+            "arena_output",
+            "type_table_csv",
+            "type_table_output",
+            "sprite_config",
+            "assert_layout_equivalent",
+            "parity",
+            "emit_fixtures",
+            "pack",
+            "layout"
+        ]
+    )]
+    pub archive_dir: Option<PathBuf>,
     /// Run the applicable legacy Python generators and byte-compare outputs.
     #[arg(long)]
     pub parity: bool,
@@ -335,5 +387,51 @@ mod tests {
         assert_eq!(cli.sprite_config, Some(PathBuf::from("fxsprites.toml")));
         assert!(cli.input.is_none());
         assert!(cli.output.is_none());
+    }
+
+    #[test]
+    fn bw_placeholder_mode_requires_archive_dir() {
+        let cli = Cli::try_parse_from([
+            "cgfx-tools",
+            "--bw-placeholders",
+            "fxsprites.toml",
+            "--archive-dir",
+            "archive",
+        ])
+        .expect("bw placeholder invocation parses");
+        assert_eq!(cli.bw_placeholders, Some(PathBuf::from("fxsprites.toml")));
+        assert_eq!(cli.archive_dir, Some(PathBuf::from("archive")));
+        assert!(
+            Cli::try_parse_from(["cgfx-tools", "--bw-placeholders", "fxsprites.toml"]).is_err()
+        );
+        assert!(Cli::try_parse_from(["cgfx-tools", "--archive-dir", "archive"]).is_err());
+    }
+
+    #[test]
+    fn bw_placeholder_mode_conflicts_with_other_modes() {
+        assert!(
+            Cli::try_parse_from([
+                "cgfx-tools",
+                "--bw-placeholders",
+                "fxsprites.toml",
+                "--archive-dir",
+                "archive",
+                "--sprite-config",
+                "other.toml",
+            ])
+            .is_err()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "cgfx-tools",
+                "--bw-placeholders",
+                "fxsprites.toml",
+                "--archive-dir",
+                "archive",
+                "input.json",
+                "output",
+            ])
+            .is_err()
+        );
     }
 }

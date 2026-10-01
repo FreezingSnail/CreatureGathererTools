@@ -115,3 +115,35 @@ bd close <id>         # Complete work
 - **Rust**: edition 2024, `anyhow` for error context, `serde` derive for models, errors cross IPC only as strings. Mixed-case module names (e.g. `tiled.rs`) are intentional.
 - **TypeScript**: strict; UI components never do I/O directly — go through `invoke`. Keep geometry/canvas math in pure modules so it can be unit-tested without a DOM.
 - **Tests are permanent** — co-located with source, never in temp directories, never deleted.
+
+## Sprite source config
+
+`cgfx-tools --sprite-config fxsprites.toml` accepts optional `shades` values `2`, `3`, or `4` for sprite and string image planes. Put the top-level setting before any TOML table header (especially before `[[set]]`):
+
+```toml
+shades = 2
+
+[[set]]
+output = "Sprites.h"
+images = ["sprites/player_16x16.png"]
+```
+
+Top-level `shades` applies to sets and strings; a set's or `[strings]` block's explicit value overrides it. `shades = 2` emits B&W (1bpp) sprites.
+
+## B&W sprite placeholders
+
+Use `cgfx-tools --bw-placeholders <sprite-config.toml> --archive-dir <dir>` to rewrite every PNG referenced by `[[set]].images` and `[strings].font` as RGBA8 black/white placeholders. The red channel uses the device threshold (`R >= 128` becomes white; otherwise black); RGB changes, alpha and dimensions do not. `--archive-dir` is required.
+
+Before any rewrite, the tool archives originals byte-for-byte at mirrored config-relative paths. Existing archive files are never overwritten: identical bytes are reused, but a different byte sequence aborts before any PNG changes. Archive writes are SHA-256 verified; successful runs print `bw-placeholders: archived <n>, converted <n>.` Rerunning is safe and idempotent.
+
+To restore source art, point a sprite config at the archive copies and set `shades = 4`, for example:
+
+```toml
+shades = 4
+
+[[set]]
+output = "Sprites.h"
+images = ["archive/sprites/player_16x16.png"]
+```
+
+Use the archived originals themselves for `[strings].font` or additional sets; never restore from the converted source PNGs.

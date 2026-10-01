@@ -379,6 +379,18 @@ pub fn run() -> anyhow::Result<()> {
         return Ok(());
     }
 
+    if let Some(config) = args.bw_placeholders {
+        let archive_dir = args
+            .archive_dir
+            .expect("clap requires --archive-dir with --bw-placeholders");
+        let stats = fxpack::bw_placeholders::convert(&config, &archive_dir)?;
+        println!(
+            "bw-placeholders: archived {}, converted {}.",
+            stats.archived, stats.converted
+        );
+        return Ok(());
+    }
+
     if let Some(config) = args.sprite_config {
         return fxpack::sprite_source::emit(&config);
     }

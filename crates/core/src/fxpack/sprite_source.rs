@@ -13,6 +13,7 @@ use super::{
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Config {
+    shades: Option<u8>,
     #[serde(default, rename = "set")]
     sets: Vec<Set>,
     strings: Option<Strings>,
@@ -23,6 +24,7 @@ struct Config {
 struct Set {
     output: PathBuf,
     images: Vec<PathBuf>,
+    shades: Option<u8>,
 }
 
 #[derive(Deserialize)]
@@ -33,24 +35,89 @@ struct Strings {
     input: PathBuf,
     glyph_width: u16,
     glyph_height: u16,
-    #[serde(default = "default_shades")]
-    shades: u8,
+    shades: Option<u8>,
     order: Vec<String>,
 }
 
-fn default_shades() -> u8 {
-    4
+pub(crate) struct ReferencedImage {
+    pub path: PathBuf,
+    pub archive_relative: PathBuf,
+}
+
+fn resolve_shades(explicit: Option<u8>, top_level: Option<u8>, name: &str) -> anyhow::Result<u8> {
+    let shades = explicit.or(top_level).unwrap_or(4);
+    if !(2..=4).contains(&shades) {
+        bail!("{name} shades must be 2, 3, or 4, got {shades}");
+    }
+    Ok(shades)
+}
+
+fn load_config(config_path: &Path) -> anyhow::Result<Config> {
+    let contents = std::fs::read_to_string(config_path)
+        .with_context(|| format!("reading sprite source config {}", config_path.display()))?;
+    toml::from_str(&contents)
+        .with_context(|| format!("parsing sprite source config {}", config_path.display()))
+}
+
+pub(crate) fn referenced_images(config_path: &Path) -> anyhow::Result<Vec<ReferencedImage>> {
+    let config = load_config(config_path)?;
+    let base = config_path.parent().unwrap_or_else(|| Path::new("."));
+    let mut seen = HashSet::new();
+    let mut images = Vec::new();
+
+    for set in config.sets {
+        for raw in set.images {
+            let path = resolve(base, raw.clone());
+            if seen.insert(path.clone()) {
+                images.push(ReferencedImage {
+                    path,
+                    archive_relative: archive_relative(&raw),
+                });
+            }
+        }
+    }
+    if let Some(strings) = config.strings {
+        let path = resolve(base, strings.font.clone());
+        if seen.insert(path.clone()) {
+            images.push(ReferencedImage {
+                path,
+                archive_relative: archive_relative(&strings.font),
+            });
+        }
+    }
+    Ok(images)
+}
+
+fn archive_relative(path: &Path) -> PathBuf {
+    let mut relative = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::Normal(value) => relative.push(value),
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                if !relative.pop() {
+                    relative.push("_parent");
+                }
+            }
+            std::path::Component::RootDir | std::path::Component::Prefix(_) => {
+                relative.push("_absolute");
+            }
+        }
+    }
+    relative
 }
 
 /// Emit legacy `Sprites.txt` C arrays from PNG/font sources without Python.
 pub fn emit(config_path: &Path) -> anyhow::Result<()> {
-    let contents = std::fs::read_to_string(config_path)
-        .with_context(|| format!("reading sprite source config {}", config_path.display()))?;
-    let config: Config = toml::from_str(&contents)
-        .with_context(|| format!("parsing sprite source config {}", config_path.display()))?;
+    let config = load_config(config_path)?;
     let base = config_path.parent().unwrap_or_else(|| Path::new("."));
 
     for set in config.sets {
+        let shades = resolve_shades(
+            set.shades,
+            config.shades,
+            &format!("set output {}", set.output.display()),
+        )?;
         let mut output = String::new();
         for image in set.images {
             let image = resolve(base, image);
@@ -61,7 +128,7 @@ pub fn emit(config_path: &Path) -> anyhow::Result<()> {
                 Params {
                     width,
                     height,
-                    shades: 4,
+                    shades,
                     spacing: 0,
                 },
             )?;
@@ -71,15 +138,13 @@ pub fn emit(config_path: &Path) -> anyhow::Result<()> {
     }
 
     if let Some(strings) = config.strings {
-        emit_strings(base, strings)?;
+        emit_strings(base, strings, config.shades)?;
     }
     Ok(())
 }
 
-fn emit_strings(base: &Path, config: Strings) -> anyhow::Result<()> {
-    if !(2..=4).contains(&config.shades) {
-        bail!("string image shades must be 2, 3, or 4");
-    }
+fn emit_strings(base: &Path, config: Strings, top_level_shades: Option<u8>) -> anyhow::Result<()> {
+    let shades = resolve_shades(config.shades, top_level_shades, "strings")?;
     let input = resolve(base, config.input);
     let namespaces = parse_legacy_strings(
         &std::fs::read_to_string(&input)
@@ -117,7 +182,7 @@ fn emit_strings(base: &Path, config: Strings) -> anyhow::Result<()> {
         let sheet = super::font::render_strings(
             &atlas,
             &[(name.clone(), by_name[name.as_str()].to_owned())],
-            config.shades,
+            shades,
         )?
         .pop()
         .expect("one input string produces one image");
@@ -247,7 +312,8 @@ fn write_output(path: &Path, contents: String) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{format_array, parse_legacy_strings};
+    use super::{Config, format_array, parse_legacy_strings, resolve_shades};
+    use crate::fxpack::sprite::{self, Params};
 
     #[test]
     fn preserves_legacy_whitespace_and_namespace_order() {
@@ -276,5 +342,127 @@ mod tests {
             format_array("sprite", &[1, 2]),
             "uint8_t sprite[] =\n{\n      1,   2, \n};\n"
         );
+    }
+
+    #[test]
+    fn absent_shades_resolves_to_byte_identical_legacy_default() {
+        let config: Config =
+            toml::from_str("[[set]]\noutput = \"sprites.h\"\nimages = []\n").unwrap();
+        let shades =
+            resolve_shades(config.sets[0].shades, config.shades, "set output sprites.h").unwrap();
+        assert_eq!(shades, 4);
+
+        let pixels = [0, 0, 0, 255, 255, 255, 255, 255];
+        let default = sprite::encode_rgba_legacy(
+            &pixels,
+            2,
+            1,
+            Params {
+                width: 2,
+                height: 1,
+                shades,
+                spacing: 0,
+            },
+        )
+        .unwrap();
+        assert_eq!(default.bytes, vec![0, 1, 0, 1, 0, 1]);
+    }
+
+    #[test]
+    fn top_level_two_shades_uses_one_plane_and_128_threshold() {
+        let pixels: Vec<u8> = [127, 128, 200, 100, 255, 0, 128, 127]
+            .into_iter()
+            .flat_map(|red| [red, 0, 0, 255])
+            .collect();
+        let sheet = sprite::encode_rgba_legacy(
+            &pixels,
+            1,
+            8,
+            Params {
+                width: 1,
+                height: 8,
+                shades: resolve_shades(None, Some(2), "set output sprites.h").unwrap(),
+                spacing: 0,
+            },
+        )
+        .unwrap();
+        assert_eq!(sheet.bytes.len(), 1);
+        assert_eq!(sheet.bytes, vec![0b0101_0110]);
+
+        let mut masked_pixels = pixels;
+        masked_pixels[2 * 4 + 3] = 0;
+        let masked = sprite::encode_rgba_legacy(
+            &masked_pixels,
+            1,
+            8,
+            Params {
+                width: 1,
+                height: 8,
+                shades: 2,
+                spacing: 0,
+            },
+        )
+        .unwrap();
+        assert_eq!(masked.bytes.len(), 2);
+        assert_eq!(masked.bytes, vec![0b0101_0110, 0b1111_1011]);
+    }
+
+    #[test]
+    fn per_set_overrides_top_level_and_strings_fallback_or_override() {
+        let config: Config = toml::from_str(
+            "shades = 2\n\n[[set]]\noutput = \"sprites.h\"\nimages = []\nshades = 4\n\n[strings]\noutput = \"strings.h\"\nfont = \"font.png\"\ninput = \"strings.txt\"\nglyph_width = 8\nglyph_height = 8\norder = []\n",
+        )
+        .unwrap();
+        assert_eq!(
+            resolve_shades(config.sets[0].shades, config.shades, "set output sprites.h").unwrap(),
+            4
+        );
+        let strings = config.strings.unwrap();
+        assert_eq!(
+            resolve_shades(strings.shades, config.shades, "strings").unwrap(),
+            2
+        );
+
+        let explicit: Config = toml::from_str(
+            "shades = 2\n[strings]\noutput = \"strings.h\"\nfont = \"font.png\"\ninput = \"strings.txt\"\nglyph_width = 8\nglyph_height = 8\nshades = 3\norder = []\n",
+        )
+        .unwrap();
+        let strings = explicit.strings.unwrap();
+        assert_eq!(
+            resolve_shades(strings.shades, explicit.shades, "strings").unwrap(),
+            3
+        );
+    }
+
+    #[test]
+    fn invalid_shades_name_set_output_or_strings() {
+        let set_error = resolve_shades(Some(1), None, "set output sprites.h").unwrap_err();
+        assert!(set_error.to_string().contains("set output sprites.h"));
+        assert!(set_error.to_string().contains("got 1"));
+
+        let strings_error = resolve_shades(Some(5), None, "strings").unwrap_err();
+        assert!(strings_error.to_string().contains("strings"));
+        assert!(strings_error.to_string().contains("got 5"));
+    }
+
+    #[test]
+    fn unknown_keys_remain_rejected_on_all_three_structs() {
+        let top_level = toml::from_str::<Config>("unknown = 2\n")
+            .err()
+            .expect("unknown top-level key must fail");
+        assert!(top_level.to_string().contains("unknown"));
+
+        let set =
+            toml::from_str::<Config>("[[set]]\noutput = \"sprites.h\"\nimages = []\nunknown = 2\n")
+                .err()
+                .expect("unknown set key must fail");
+        assert!(set.to_string().contains("unknown"));
+
+        let strings = toml::from_str::<Config>(
+            "[strings]\noutput = \"strings.h\"\nfont = \"font.png\"\ninput = \"strings.txt\"\nglyph_width = 8\nglyph_height = 8\norder = []\nunknown = 2\n",
+        )
+        .err()
+        .expect("unknown strings key must fail");
+        assert!(strings.to_string().contains("unknown"));
     }
 }

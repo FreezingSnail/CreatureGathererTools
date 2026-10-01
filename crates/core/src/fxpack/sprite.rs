@@ -237,8 +237,12 @@ fn mask_of(rgba: &[u8]) -> u8 {
 }
 
 pub(crate) fn decode_rgba(path: &Path) -> anyhow::Result<(Vec<u8>, u32, u32)> {
-    let file = std::fs::File::open(path).with_context(|| format!("Opening {}", path.display()))?;
-    let mut decoder = png::Decoder::new(file);
+    let bytes = std::fs::read(path).with_context(|| format!("Opening {}", path.display()))?;
+    decode_rgba_bytes(&bytes, path)
+}
+
+pub(crate) fn decode_rgba_bytes(bytes: &[u8], path: &Path) -> anyhow::Result<(Vec<u8>, u32, u32)> {
+    let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
     decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
     let mut reader = decoder
         .read_info()
