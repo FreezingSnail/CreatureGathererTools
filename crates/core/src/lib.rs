@@ -329,6 +329,17 @@ pub fn run() -> anyhow::Result<()> {
         return Ok(());
     }
 
+    if let Some(csv) = args.consumables_csv {
+        let output = args.consumables_output.ok_or_else(|| {
+            anyhow::anyhow!("--consumables-output is required with --consumables-csv")
+        })?;
+        let table = builder::load_consumables_csv(&csv)
+            .with_context(|| format!("Loading consumables from {}", csv.display()))?;
+        builder::write_consumables(&output, &table)
+            .with_context(|| format!("Writing consumables to {}", output.display()))?;
+        return Ok(());
+    }
+
     if let Some(csv) = args.opponents_csv {
         let output = args.opponents_output.ok_or_else(|| {
             anyhow::anyhow!("--opponents-output is required with --opponents-csv")

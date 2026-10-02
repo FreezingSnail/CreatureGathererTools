@@ -189,6 +189,163 @@ pub fn write_type_table(output_dir: impl AsRef<Path>, table: &TypeTable) -> Resu
     write_bytes(&output_dir.join("typetable.bin"), &build_type_table(table))
 }
 
+const CONSUMABLE_COUNT: usize = 8;
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConsumableKind {
+    None = 0,
+    Heal = 1,
+    Cure = 2,
+    Charge = 3,
+}
+
+impl ConsumableKind {
+    fn parse(value: &str) -> Result<Self, BuildError> {
+        match value {
+            "None" => Ok(Self::None),
+            "Heal" => Ok(Self::Heal),
+            "Cure" => Ok(Self::Cure),
+            "Charge" => Ok(Self::Charge),
+            _ => Err(BuildError(format!(
+                "unknown consumable kind {value:?}; expected None, Heal, Cure, or Charge"
+            ))),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConsumableDef {
+    pub kind: ConsumableKind,
+    pub arg: u8,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConsumableTable {
+    pub rows: [ConsumableDef; CONSUMABLE_COUNT],
+}
+
+fn parse_consumables_csv_source(
+    source: &str,
+    source_name: &str,
+) -> Result<ConsumableTable, BuildError> {
+    let mut header_seen = false;
+    let mut row_count = 0usize;
+    let empty = ConsumableDef {
+        kind: ConsumableKind::None,
+        arg: 0,
+    };
+    let mut rows = [empty; CONSUMABLE_COUNT];
+    let mut seen = [false; CONSUMABLE_COUNT];
+
+    for (line_index, raw_line) in source.lines().enumerate() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if !header_seen {
+            header_seen = true;
+            if line != "id,kind,arg" {
+                return Err(BuildError(format!(
+                    "reading {source_name} line {}: expected header id,kind,arg",
+                    line_index + 1
+                )));
+            }
+            continue;
+        }
+
+        row_count += 1;
+        let fields: Vec<_> = line.split(',').map(str::trim).collect();
+        if fields.len() != 3 {
+            return Err(BuildError(format!(
+                "reading {source_name} line {}: expected 3 columns id,kind,arg",
+                line_index + 1
+            )));
+        }
+        let id = fields[0].parse::<usize>().map_err(|_| {
+            BuildError(format!(
+                "reading {source_name} line {}: invalid consumable id {:?}",
+                line_index + 1,
+                fields[0]
+            ))
+        })?;
+        if id >= CONSUMABLE_COUNT {
+            return Err(BuildError(format!(
+                "reading {source_name} line {}: consumable id {id} is outside 0..{}",
+                line_index + 1,
+                CONSUMABLE_COUNT - 1
+            )));
+        }
+        if seen[id] {
+            return Err(BuildError(format!(
+                "reading {source_name} line {}: duplicate consumable id {id}",
+                line_index + 1
+            )));
+        }
+        let kind = ConsumableKind::parse(fields[1]).map_err(|error| {
+            BuildError(format!(
+                "reading {source_name} line {}: {error}",
+                line_index + 1
+            ))
+        })?;
+        let arg = fields[2].parse::<u8>().map_err(|_| {
+            BuildError(format!(
+                "reading {source_name} line {}: invalid consumable arg {:?}; expected 0..255",
+                line_index + 1,
+                fields[2]
+            ))
+        })?;
+        rows[id] = ConsumableDef { kind, arg };
+        seen[id] = true;
+    }
+
+    if !header_seen {
+        return Err(BuildError(format!("reading {source_name}: missing header")));
+    }
+    if row_count != CONSUMABLE_COUNT {
+        return Err(BuildError(format!(
+            "reading {source_name}: expected {CONSUMABLE_COUNT} rows, found {row_count}"
+        )));
+    }
+    for (id, present) in seen.iter().enumerate() {
+        if !present {
+            return Err(BuildError(format!(
+                "reading {source_name}: missing consumable id {id}"
+            )));
+        }
+    }
+    Ok(ConsumableTable { rows })
+}
+
+/// Loads exactly eight indexed consumables from the canonical CSV source.
+pub fn load_consumables_csv(path: impl AsRef<Path>) -> Result<ConsumableTable, BuildError> {
+    let path = path.as_ref();
+    let source = std::fs::read_to_string(path).map_err(|e| io_err("reading", path, e))?;
+    parse_consumables_csv_source(&source, &path.display().to_string())
+}
+
+/// Builds eight two-byte records in id order: kind followed by arg.
+pub fn build_consumables(table: &ConsumableTable) -> Vec<u8> {
+    table
+        .rows
+        .iter()
+        .flat_map(|row| [row.kind as u8, row.arg])
+        .collect()
+}
+
+/// Writes `consumables.bin` into an artifact directory.
+pub fn write_consumables(
+    output_dir: impl AsRef<Path>,
+    table: &ConsumableTable,
+) -> Result<(), BuildError> {
+    let output_dir = output_dir.as_ref();
+    std::fs::create_dir_all(output_dir).map_err(|e| io_err("creating", output_dir, e))?;
+    write_bytes(
+        &output_dir.join("consumables.bin"),
+        &build_consumables(table),
+    )
+}
+
 /// Verifies a generated artifact against its reference bytes. Shared by data
 /// builders so every parity failure identifies the first divergent byte and
 /// both commands needed to reproduce it.
@@ -1173,6 +1330,70 @@ mod tests {
     const TYPE_TABLE_PYTHON_COMMAND: &str =
         "python3 tools/data_converters/type_table_data.py --format fx";
     const TYPE_TABLE_RUST_COMMAND: &str = "cgfx-tools --project cgfx-project.json";
+
+    const CONSUMABLES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/consumables.csv");
+
+    #[test]
+    fn consumables_build_as_eight_kind_arg_records_in_id_order() {
+        let table = load_consumables_csv(CONSUMABLES).expect("consumables fixture parses");
+        assert_eq!(
+            table.rows[0],
+            ConsumableDef {
+                kind: ConsumableKind::Heal,
+                arg: 16
+            }
+        );
+        assert_eq!(
+            table.rows[7],
+            ConsumableDef {
+                kind: ConsumableKind::Charge,
+                arg: 32
+            }
+        );
+        assert_eq!(
+            build_consumables(&table),
+            [1, 16, 1, 32, 1, 64, 2, 1, 2, 2, 2, 3, 3, 16, 3, 32]
+        );
+    }
+
+    #[test]
+    fn consumables_reject_wrong_row_count_duplicate_id_and_unknown_kind() {
+        let valid = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/testdata/consumables.csv"
+        ));
+        let too_few = valid.lines().take(9).collect::<Vec<_>>().join("\n");
+        assert!(
+            parse_consumables_csv_source(&too_few, "too_few.csv")
+                .expect_err("seven records must fail")
+                .to_string()
+                .contains("expected 8 rows, found 7")
+        );
+
+        let duplicate = valid.replace("7,Charge,32", "0,Charge,32");
+        assert!(
+            parse_consumables_csv_source(&duplicate, "duplicate.csv")
+                .expect_err("duplicate id must fail")
+                .to_string()
+                .contains("duplicate consumable id 0")
+        );
+
+        let unknown = valid.replace("7,Charge,32", "7,Unknown,32");
+        assert!(
+            parse_consumables_csv_source(&unknown, "unknown.csv")
+                .expect_err("unknown kind must fail")
+                .to_string()
+                .contains("unknown consumable kind")
+        );
+
+        let gap = valid.replace("7,Charge,32", "8,Charge,32");
+        assert!(
+            parse_consumables_csv_source(&gap, "gap.csv")
+                .expect_err("out-of-range id leaves a gap and must fail")
+                .to_string()
+                .contains("outside 0..7")
+        );
+    }
 
     #[test]
     fn build_type_table_matches_python_layout() {

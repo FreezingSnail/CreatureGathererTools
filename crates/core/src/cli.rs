@@ -26,6 +26,8 @@ pub struct Cli {
             "arena_output",
             "type_table_csv",
             "type_table_output",
+            "consumables_csv",
+            "consumables_output",
             "sprite_config",
             "bw_placeholders",
             "assert_layout_equivalent"
@@ -47,6 +49,8 @@ pub struct Cli {
             "arena_output",
             "type_table_csv",
             "type_table_output",
+            "consumables_csv",
+            "consumables_output",
             "sprite_config",
             "bw_placeholders"
         ]
@@ -58,6 +62,7 @@ pub struct Cli {
         "opponents_csv",
         "arena_csv",
         "type_table_csv",
+        "consumables_csv",
         "sprite_config",
         "bw_placeholders",
         "assert_layout_equivalent"
@@ -69,6 +74,7 @@ pub struct Cli {
         "opponents_csv",
         "arena_csv",
         "type_table_csv",
+        "consumables_csv",
         "sprite_config",
         "bw_placeholders",
         "assert_layout_equivalent"
@@ -83,17 +89,23 @@ pub struct Cli {
     /// Output directory for Rust-built `typetable.bin`.
     #[arg(long, value_name = "DIR", requires = "type_table_csv")]
     pub type_table_output: Option<PathBuf>,
+    /// Output directory for Rust-built `consumables.bin`.
+    #[arg(long, value_name = "DIR", requires = "consumables_csv")]
+    pub consumables_output: Option<PathBuf>,
     /// Build `opponents.bin` from the canonical `data/opponents.csv` source.
-    #[arg(long, value_name = "CSV", conflicts_with_all = ["input", "arena_csv", "type_table_csv"])]
+    #[arg(long, value_name = "CSV", conflicts_with_all = ["input", "arena_csv", "type_table_csv", "consumables_csv"])]
     pub opponents_csv: Option<PathBuf>,
     /// Build arena `teamList` source bytes from the canonical `data/arena.csv` source.
-    #[arg(long, value_name = "CSV", conflicts_with_all = ["input", "opponents_csv", "type_table_csv"])]
+    #[arg(long, value_name = "CSV", conflicts_with_all = ["input", "opponents_csv", "type_table_csv", "consumables_csv"])]
     pub arena_csv: Option<PathBuf>,
     /// Build `typetable.bin` from the canonical `data/typetable.csv` source.
-    #[arg(long, value_name = "CSV", conflicts_with_all = ["input", "opponents_csv", "arena_csv"])]
+    #[arg(long, value_name = "CSV", conflicts_with_all = ["input", "opponents_csv", "arena_csv", "consumables_csv"])]
     pub type_table_csv: Option<PathBuf>,
+    /// Build `consumables.bin` from the canonical `data/consumables.csv` source.
+    #[arg(long, value_name = "CSV", conflicts_with_all = ["input", "opponents_csv", "arena_csv", "type_table_csv"])]
+    pub consumables_csv: Option<PathBuf>,
     /// Emit legacy-compatible sprite C arrays from a native TOML source config.
-    #[arg(long, value_name = "FILE", conflicts_with_all = ["input", "output", "project", "opponents_csv", "arena_csv", "type_table_csv", "bw_placeholders"])]
+    #[arg(long, value_name = "FILE", conflicts_with_all = ["input", "output", "project", "opponents_csv", "arena_csv", "type_table_csv", "consumables_csv", "consumables_output", "bw_placeholders"])]
     pub sprite_config: Option<PathBuf>,
     /// Rewrite referenced PNGs as black/white RGBA8 placeholders after archiving originals.
     #[arg(
@@ -110,6 +122,8 @@ pub struct Cli {
             "arena_output",
             "type_table_csv",
             "type_table_output",
+            "consumables_csv",
+            "consumables_output",
             "sprite_config",
             "assert_layout_equivalent",
             "parity",
@@ -134,6 +148,8 @@ pub struct Cli {
             "arena_output",
             "type_table_csv",
             "type_table_output",
+            "consumables_csv",
+            "consumables_output",
             "sprite_config",
             "assert_layout_equivalent",
             "parity",
@@ -306,6 +322,24 @@ mod tests {
         );
         assert_eq!(cli.type_table_output, Some(PathBuf::from("out")));
         assert!(cli.parity);
+    }
+
+    #[test]
+    fn consumables_mode_accepts_csv_and_output() {
+        let cli = Cli::try_parse_from([
+            "cgfx-tools",
+            "--consumables-csv",
+            "data/consumables.csv",
+            "--consumables-output",
+            "out",
+        ])
+        .expect("consumables invocation parses");
+        assert_eq!(
+            cli.consumables_csv,
+            Some(PathBuf::from("data/consumables.csv"))
+        );
+        assert_eq!(cli.consumables_output, Some(PathBuf::from("out")));
+        assert!(Cli::try_parse_from(["cgfx-tools", "--consumables-output", "out"]).is_err());
     }
 
     #[test]
