@@ -195,25 +195,25 @@ fn assert_source_order(declarations: &[Declaration]) {
 fn enumerates_real_generated_sprite_declarations() {
     let declarations = declarations("fxdata/generated/Sprites.txt");
 
-    assert_eq!(declarations.len(), 108);
+    assert_eq!(declarations.len(), 130);
     assert_source_order(&declarations);
     assert_declaration(&declarations, 0, "amove20", None, CType::U8, 1);
     assert_declaration(&declarations, 52, "plant", None, CType::U8, 963);
     assert_declaration(
         &declarations,
-        104,
+        123,
         "CreatureNames",
         Some("CreatureNames"),
         CType::U24,
-        1998,
+        2294,
     );
     assert_declaration(
         &declarations,
-        107,
+        126,
         "EffectStrings",
         Some("EffectStrings"),
         CType::U24,
-        2007,
+        2303,
     );
 }
 
