@@ -1,0 +1,25 @@
+label_font = "../images/ArduFont_5x6.png"
+
+[[player_team]]
+key = "starter"
+label = "Starter"
+
+[[player_team.members]]
+species = "SquibbleSnail"
+level = 31
+moves = ["torrent", "none", "none", "none"]
+
+[[player_team.members]]
+species = "SkitterCrab"
+level = 31
+moves = ["torrent", "none", "none", "none"]
+
+[[player_team.members]]
+species = "squid"
+level = 31
+moves = ["torrent", "none", "none", "none"]
+
+[[opponent_team]]
+key = "rival"
+label = "Rival"
+trainer_species = ["SquibbleSnail", "SkitterCrab", "squid"]

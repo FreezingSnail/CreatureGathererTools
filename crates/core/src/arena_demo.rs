@@ -1,0 +1,614 @@
+//! Strict parser for the authored arena demo roster.
+
+use crate::builder::BuildError;
+use crate::model::{Creature, Move, OpponentPartyMember, OpponentSeed};
+use serde::Deserialize;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+
+const EMPTY_PLAYER_MOVE: u8 = 32;
+const EMPTY_OPPONENT_MOVE: u8 = 255;
+const MAX_LIST_ITEMS: usize = 255;
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Source {
+    label_font: String,
+    player_team: Vec<SourcePlayer>,
+    opponent_team: Vec<SourceOpponent>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SourcePlayer {
+    key: String,
+    label: String,
+    members: Vec<SourceMember>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SourceMember {
+    species: String,
+    level: u8,
+    moves: [String; 4],
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SourceOpponent {
+    key: String,
+    label: String,
+    trainer_species: [String; 3],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Member {
+    pub species: u8,
+    pub level: u8,
+    pub move_ids: [u8; 4],
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlayerTeam {
+    pub key: String,
+    pub label: String,
+    pub members: [Member; 3],
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpponentTeam {
+    pub key: String,
+    pub label: String,
+    pub trainer_id: u8,
+    pub species: [u8; 3],
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Catalog {
+    pub label_font: PathBuf,
+    pub players: Vec<PlayerTeam>,
+    pub opponents: Vec<OpponentTeam>,
+}
+
+fn valid_key(key: &str) -> bool {
+    !key.is_empty()
+        && key.as_bytes()[0].is_ascii_lowercase()
+        && key
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+}
+
+fn validate_list<T>(items: &[T], kind: &str) -> Result<(), BuildError> {
+    if !(1..=MAX_LIST_ITEMS).contains(&items.len()) {
+        return Err(BuildError(format!(
+            "arena {kind} list must contain 1..={MAX_LIST_ITEMS} entries, found {}",
+            items.len()
+        )));
+    }
+    Ok(())
+}
+
+fn validate_key_label(
+    key: &str,
+    label: &str,
+    kind: &str,
+    keys: &mut HashSet<String>,
+) -> Result<(), BuildError> {
+    if !valid_key(key) || !keys.insert(key.to_owned()) {
+        return Err(BuildError(format!(
+            "arena {kind} has invalid or duplicate key {key:?}"
+        )));
+    }
+    if !(1..=18).contains(&label.len())
+        || !label.is_ascii()
+        || !label.bytes().all(|b| (0x20..=0x7e).contains(&b))
+    {
+        return Err(BuildError(format!(
+            "arena {kind} {key:?} label must be 1..18 printable ASCII characters"
+        )));
+    }
+    Ok(())
+}
+
+fn species_id(name: &str, creatures: &[Creature], context: &str) -> Result<u8, BuildError> {
+    let matches: Vec<_> = creatures
+        .iter()
+        .filter(|creature| creature.name.eq_ignore_ascii_case(name))
+        .collect();
+    if matches.len() != 1 {
+        return Err(BuildError(format!(
+            "{context}: species {name:?} resolves to {} canonical creatures",
+            matches.len()
+        )));
+    }
+    let id = u8::try_from(matches[0].id)
+        .map_err(|_| BuildError(format!("{context}: species {name:?} has invalid ID")))?;
+    if id == u8::MAX {
+        return Err(BuildError(format!(
+            "{context}: species {name:?} uses reserved empty ID 255"
+        )));
+    }
+    Ok(id)
+}
+
+fn move_id(name: &str, moves: &[Move], context: &str) -> Result<u8, BuildError> {
+    if name == "none" {
+        return Ok(EMPTY_PLAYER_MOVE);
+    }
+    let matches: Vec<_> = moves
+        .iter()
+        .filter(|movement| movement.name == name)
+        .collect();
+    if matches.len() != 1 {
+        return Err(BuildError(format!(
+            "{context}: move {name:?} resolves to {} canonical moves",
+            matches.len()
+        )));
+    }
+    let id = u8::try_from(matches[0].id)
+        .map_err(|_| BuildError(format!("{context}: move {name:?} has invalid ID")))?;
+    if id == u8::MAX {
+        return Err(BuildError(format!(
+            "{context}: move {name:?} uses reserved empty ID 255"
+        )));
+    }
+    Ok(id)
+}
+
+fn validate_opponent_member(
+    member: OpponentPartyMember,
+    moves: &[Move],
+    context: &str,
+) -> Result<(), BuildError> {
+    if !(1..=31).contains(&member.level) {
+        return Err(BuildError(format!(
+            "{context}: opponent level {} outside 1..31",
+            member.level
+        )));
+    }
+    let mut has_move = false;
+    // OpponentSeed's model contract defines the packed bytes as little-endian,
+    // with move 1 in the low byte. 255 is this format's empty-slot sentinel.
+    for id in member.moves.to_le_bytes() {
+        if id == EMPTY_OPPONENT_MOVE {
+            continue;
+        }
+        has_move = true;
+        let matches = moves
+            .iter()
+            .filter(|movement| movement.id == i32::from(id))
+            .count();
+        if matches != 1 {
+            return Err(BuildError(format!(
+                "{context}: packed opponent move ID {id} resolves to {matches} canonical moves"
+            )));
+        }
+    }
+    if !has_move {
+        return Err(BuildError(format!(
+            "{context}: opponent has no usable authored move"
+        )));
+    }
+    Ok(())
+}
+
+pub fn parse(
+    source: &str,
+    creatures: &[Creature],
+    moves: &[Move],
+    opponents: &[OpponentSeed],
+) -> Result<Catalog, BuildError> {
+    let parsed: Source = toml::from_str(source)
+        .map_err(|error| BuildError(format!("invalid arena demo TOML: {error}")))?;
+    validate_list(&parsed.player_team, "player_team")?;
+    validate_list(&parsed.opponent_team, "opponent_team")?;
+    if parsed.label_font.is_empty() {
+        return Err(BuildError("arena label_font must not be empty".into()));
+    }
+
+    let mut player_keys = HashSet::new();
+    let mut players = Vec::with_capacity(parsed.player_team.len());
+    for team in parsed.player_team {
+        validate_key_label(&team.key, &team.label, "player team", &mut player_keys)?;
+        if team.members.len() != 3 {
+            return Err(BuildError(format!(
+                "player team {:?} needs exactly 3 members, found {}",
+                team.key,
+                team.members.len()
+            )));
+        }
+        let mut resolved = Vec::with_capacity(3);
+        for (index, member) in team.members.into_iter().enumerate() {
+            let context = format!("player team {:?} member {}", team.key, index + 1);
+            if !(1..=31).contains(&member.level) {
+                return Err(BuildError(format!(
+                    "{context}: level {} outside 1..31",
+                    member.level
+                )));
+            }
+            let mut move_ids = [EMPTY_PLAYER_MOVE; 4];
+            let mut has_move = false;
+            for (slot, name) in member.moves.iter().enumerate() {
+                move_ids[slot] = move_id(name, moves, &format!("{context} move {}", slot + 1))?;
+                has_move |= move_ids[slot] != EMPTY_PLAYER_MOVE;
+            }
+            if !has_move {
+                return Err(BuildError(format!(
+                    "{context}: member has no authored move"
+                )));
+            }
+            resolved.push(Member {
+                species: species_id(&member.species, creatures, &context)?,
+                level: member.level,
+                move_ids,
+            });
+        }
+        let members: [Member; 3] = resolved.try_into().expect("length checked");
+        players.push(PlayerTeam {
+            key: team.key,
+            label: team.label,
+            members,
+        });
+    }
+
+    let mut opponent_keys = HashSet::new();
+    let mut resolved_opponents = Vec::with_capacity(parsed.opponent_team.len());
+    for team in parsed.opponent_team {
+        validate_key_label(&team.key, &team.label, "opponent team", &mut opponent_keys)?;
+        let mut species = [0; 3];
+        for (index, name) in team.trainer_species.iter().enumerate() {
+            species[index] = species_id(
+                name,
+                creatures,
+                &format!("opponent team {:?} member {}", team.key, index + 1),
+            )?;
+        }
+        let matching: Vec<_> = opponents
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| {
+                [
+                    row.first.creature_id,
+                    row.second.creature_id,
+                    row.third.creature_id,
+                ] == species
+            })
+            .collect();
+        if matching.len() != 1 {
+            return Err(BuildError(format!(
+                "opponent team {:?} species triple resolves to {} canonical opponent rows",
+                team.key,
+                matching.len()
+            )));
+        }
+        let (trainer_index, seed) = matching[0];
+        let trainer_id = u8::try_from(trainer_index).map_err(|_| {
+            BuildError(format!(
+                "opponent team {:?} trainer index exceeds uint8_t",
+                team.key
+            ))
+        })?;
+        if trainer_id == u8::MAX {
+            return Err(BuildError(format!(
+                "opponent team {:?} trainer index 255 is reserved",
+                team.key
+            )));
+        }
+        for (index, member) in [seed.first, seed.second, seed.third]
+            .into_iter()
+            .enumerate()
+        {
+            validate_opponent_member(
+                member,
+                moves,
+                &format!("opponent team {:?} member {}", team.key, index + 1),
+            )?;
+        }
+        resolved_opponents.push(OpponentTeam {
+            key: team.key,
+            label: team.label,
+            trainer_id,
+            species,
+        });
+    }
+
+    Ok(Catalog {
+        label_font: PathBuf::from(parsed.label_font),
+        players,
+        opponents: resolved_opponents,
+    })
+}
+
+pub fn load(
+    path: impl AsRef<Path>,
+    creatures: &[Creature],
+    moves: &[Move],
+    opponents: &[OpponentSeed],
+) -> Result<Catalog, BuildError> {
+    let path = path.as_ref();
+    let source = std::fs::read_to_string(path)
+        .map_err(|error| BuildError(format!("reading {}: {error}", path.display())))?;
+    let mut catalog = parse(&source, creatures, moves, opponents)
+        .map_err(|error| BuildError(format!("{}: {error}", path.display())))?;
+    let font = PathBuf::from(catalog.label_font);
+    catalog.label_font = if font.is_absolute() {
+        font
+    } else {
+        path.parent().unwrap_or_else(|| Path::new(".")).join(font)
+    };
+    Ok(catalog)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::OpponentPartyMember;
+
+    const VALID: &str = include_str!("../testdata/arena_demo/arena-demo.toml");
+
+    fn creature(name: &str, id: i32) -> Creature {
+        Creature {
+            name: name.into(),
+            id,
+            type1: "wind".into(),
+            type2: "none".into(),
+            evo_level: 0,
+            atk: 1,
+            def: 1,
+            spc_atk: 1,
+            spc_def: 1,
+            hp: 1,
+            spd: 1,
+            move1: 0,
+            move2: 0,
+            move3: 0,
+            move4: 0,
+            move_list: vec![],
+        }
+    }
+
+    fn movement(name: &str, id: i32) -> Move {
+        Move {
+            name: name.into(),
+            id,
+            r#type: "spirit".into(),
+            power: 1,
+            physical: 0,
+            accuracy: 100,
+            effect: "NONE".into(),
+        }
+    }
+
+    fn models() -> (Vec<Creature>, Vec<Move>, Vec<OpponentSeed>) {
+        let creatures = vec![
+            creature("SquibbleSnail", 0),
+            creature("SkitterCrab", 3),
+            creature("squid", 6),
+        ];
+        let moves = vec![movement("torrent", 10), movement("Torrent", 11)];
+        let member = |id| OpponentPartyMember {
+            creature_id: id,
+            level: 31,
+            moves: u32::from_le_bytes([10, 255, 255, 255]),
+        };
+        let opponents = vec![OpponentSeed {
+            first: member(0),
+            second: member(3),
+            third: member(6),
+        }];
+        (creatures, moves, opponents)
+    }
+
+    fn reject(source: &str, expected: &str) {
+        let (creatures, moves, opponents) = models();
+        let error = parse(source, &creatures, &moves, &opponents).unwrap_err();
+        assert!(error.0.contains(expected), "{error}");
+    }
+
+    #[test]
+    fn resolves_valid_roster_and_sentinels() {
+        let (creatures, moves, opponents) = models();
+        let catalog = parse(VALID, &creatures, &moves, &opponents).unwrap();
+        assert_eq!(catalog.players.len(), 1);
+        assert_eq!(catalog.players[0].members[0].species, 0);
+        assert_eq!(catalog.players[0].members[0].move_ids, [10, 32, 32, 32]);
+        assert_eq!(catalog.opponents[0].trainer_id, 0);
+        assert_eq!(catalog.opponents[0].species, [0, 3, 6]);
+        assert!(catalog.label_font.ends_with("../images/ArduFont_5x6.png"));
+    }
+
+    #[test]
+    fn species_are_case_insensitive_but_moves_are_case_sensitive() {
+        let (creatures, moves, opponents) = models();
+        let parsed = parse(
+            &VALID
+                .replace("SquibbleSnail", "sQuIbBlEsNaIl")
+                .replace("torrent", "Torrent"),
+            &creatures,
+            &moves,
+            &opponents,
+        )
+        .unwrap();
+        assert_eq!(parsed.players[0].members[0].species, 0);
+        assert_eq!(parsed.players[0].members[0].move_ids[0], 11);
+        reject(
+            &VALID.replace("torrent", "TORRENT"),
+            "resolves to 0 canonical moves",
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_fields_missing_values_and_invalid_members() {
+        reject(&format!("{VALID}\nunknown = 1\n"), "unknown field");
+        reject(
+            &VALID.replace("label_font = \"../images/ArduFont_5x6.png\"\n", ""),
+            "missing field",
+        );
+        reject(&VALID.replace("level = 31", "level = 0"), "outside 1..31");
+        reject(&VALID.replace("level = 31", "level = 32"), "outside 1..31");
+        reject(
+            &VALID.replace(
+                "moves = [\"torrent\", \"none\", \"none\", \"none\"]",
+                "moves = [\"none\", \"none\", \"none\", \"none\"]",
+            ),
+            "no authored move",
+        );
+        reject(
+            &VALID.replace(
+                "[[player_team.members]]\nspecies = \"squid\"\nlevel = 31\nmoves = [\"torrent\", \"none\", \"none\", \"none\"]\n",
+                "",
+            ),
+            "exactly 3 members",
+        );
+        reject(
+            &VALID.replace(
+                "[[opponent_team]]",
+                "[[player_team.members]]\nspecies = \"squid\"\nlevel = 31\nmoves = [\"torrent\", \"none\", \"none\", \"none\"]\n\n[[opponent_team]]",
+            ),
+            "exactly 3 members",
+        );
+        reject(
+            &VALID.replace(
+                "[\"torrent\", \"none\", \"none\", \"none\"]",
+                "[\"torrent\", \"none\", \"none\"]",
+            ),
+            "invalid arena demo TOML",
+        );
+    }
+
+    #[test]
+    fn rejects_keys_labels_species_and_trainer_rows() {
+        reject(
+            &VALID.replace("key = \"starter\"", "key = \"Bad-Key\""),
+            "invalid or duplicate key",
+        );
+        reject(
+            &VALID.replace("label = \"Starter\"", "label = \"\""),
+            "printable ASCII",
+        );
+        reject(
+            &VALID.replace("label = \"Starter\"", "label = \"This label is too long\""),
+            "printable ASCII",
+        );
+        reject(
+            &VALID.replace("SquibbleSnail", "missingSpecies"),
+            "resolves to 0 canonical creatures",
+        );
+        reject(
+            &VALID.replace(
+                "trainer_species = [\"SquibbleSnail\", \"SkitterCrab\", \"squid\"]",
+                "trainer_species = [\"SquibbleSnail\", \"SkitterCrab\", \"SquibbleSnail\"]",
+            ),
+            "0 canonical opponent rows",
+        );
+        reject(
+            &format!(
+                "{VALID}\n[[opponent_team]]\nkey = \"rival\"\nlabel = \"Duplicate\"\ntrainer_species = [\"SquibbleSnail\", \"SkitterCrab\", \"squid\"]\n"
+            ),
+            "duplicate key",
+        );
+    }
+
+    #[test]
+    fn rejects_ambiguous_ids_empty_opponent_moves_and_reserved_trainer_index() {
+        let (mut creatures, moves, opponents) = models();
+        creatures.push(creature("sQUIBBLESNAIL", 1));
+        let error = parse(VALID, &creatures, &moves, &opponents).unwrap_err();
+        assert!(error.0.contains("resolves to 2 canonical creatures"));
+
+        let (creatures, mut moves, opponents) = models();
+        moves.push(movement("torrent", 12));
+        let error = parse(VALID, &creatures, &moves, &opponents).unwrap_err();
+        assert!(error.0.contains("resolves to 2 canonical moves"));
+
+        let (creatures, moves, mut opponents) = models();
+        opponents.push(opponents[0]);
+        let error = parse(VALID, &creatures, &moves, &opponents).unwrap_err();
+        assert!(error.0.contains("resolves to 2 canonical opponent rows"));
+
+        let (creatures, moves, mut opponents) = models();
+        opponents[0].first.moves = u32::MAX;
+        let error = parse(VALID, &creatures, &moves, &opponents).unwrap_err();
+        assert!(error.0.contains("no usable authored move"));
+        opponents[0].first.level = 0;
+        let error = parse(VALID, &creatures, &moves, &opponents).unwrap_err();
+        assert!(error.0.contains("opponent level 0 outside 1..31"));
+        opponents[0].first.level = 31;
+        opponents[0].first.moves = u32::from_le_bytes([250, 255, 255, 255]);
+        let error = parse(VALID, &creatures, &moves, &opponents).unwrap_err();
+        assert!(error.0.contains("packed opponent move ID 250"));
+
+        let (creatures, moves, _) = models();
+        let member = |id| OpponentPartyMember {
+            creature_id: id,
+            level: 31,
+            moves: u32::from_le_bytes([10, 255, 255, 255]),
+        };
+        let other = OpponentSeed {
+            first: member(6),
+            second: member(6),
+            third: member(6),
+        };
+        let target = OpponentSeed {
+            first: member(0),
+            second: member(3),
+            third: member(6),
+        };
+        let mut many = vec![other; 255];
+        many.push(target);
+        let error = parse(VALID, &creatures, &moves, &many).unwrap_err();
+        assert!(error.0.contains("trainer index 255 is reserved"));
+    }
+
+    #[test]
+    fn enforces_list_count_limits_and_accepts_count_255() {
+        let (creatures, moves, opponents) = models();
+        let player_entry = VALID
+            .split("[[player_team]]")
+            .nth(1)
+            .unwrap()
+            .split("[[opponent_team]]")
+            .next()
+            .unwrap();
+        let roster = (0..255)
+            .map(|i| {
+                format!(
+                    "[[player_team]]\n{}",
+                    player_entry.replace("key = \"starter\"", &format!("key = \"team_{i}\""))
+                )
+            })
+            .collect::<String>();
+        let source = format!(
+            "label_font = \"../images/ArduFont_5x6.png\"\n{roster}[[opponent_team]]\nkey = \"rival\"\nlabel = \"Rival\"\ntrainer_species = [\"SquibbleSnail\", \"SkitterCrab\", \"squid\"]\n"
+        );
+        assert_eq!(
+            parse(&source, &creatures, &moves, &opponents)
+                .unwrap()
+                .players
+                .len(),
+            255
+        );
+        let duplicate_opponents = (0..255).map(|i| format!("[[opponent_team]]\nkey = \"rival_{i}\"\nlabel = \"Rival\"\ntrainer_species = [\"SquibbleSnail\", \"SkitterCrab\", \"squid\"]\n")).collect::<String>();
+        let malformed = format!("{source}{duplicate_opponents}");
+        let error = parse(&malformed, &creatures, &moves, &opponents).unwrap_err();
+        assert!(error.0.contains("1..=255"));
+    }
+
+    #[test]
+    fn load_resolves_font_relative_to_source_and_adds_path_to_errors() {
+        let (creatures, moves, opponents) = models();
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/testdata/arena_demo/arena-demo.toml"
+        );
+        let catalog = load(path, &creatures, &moves, &opponents).unwrap();
+        assert!(
+            catalog
+                .label_font
+                .ends_with("testdata/arena_demo/../images/ArduFont_5x6.png")
+        );
+        let error = load("missing-arena-demo.toml", &creatures, &moves, &opponents).unwrap_err();
+        assert!(error.0.contains("missing-arena-demo.toml"));
+    }
+}

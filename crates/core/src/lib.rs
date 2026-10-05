@@ -1,4 +1,5 @@
 pub mod arena;
+pub mod arena_demo;
 pub mod blocks;
 pub mod builder;
 pub mod cli;
