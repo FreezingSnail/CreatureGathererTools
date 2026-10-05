@@ -890,7 +890,18 @@ fn parse_opponent_member(
 /// Loads the canonical Python-compatible `data/opponents.csv` schema. The
 /// name column is metadata; binary output contains only the three party slots.
 pub fn load_opponents_csv(path: impl AsRef<Path>) -> Result<Vec<OpponentSeed>, BuildError> {
-    let path = path.as_ref();
+    load_opponents_csv_with(path.as_ref(), |row, _member, id, level, moves, line| {
+        parse_opponent_member(row, id, level, moves, line)
+    })
+}
+
+fn load_opponents_csv_with<F>(
+    path: &Path,
+    mut parse_member: F,
+) -> Result<Vec<OpponentSeed>, BuildError>
+where
+    F: FnMut(&[&str], &str, usize, usize, usize, usize) -> Result<OpponentPartyMember, BuildError>,
+{
     let text = std::fs::read_to_string(path).map_err(|e| io_err("reading", path, e))?;
     let mut lines = text.lines();
     let Some(header) = lines.next() else {
@@ -918,12 +929,79 @@ pub fn load_opponents_csv(path: impl AsRef<Path>) -> Result<Vec<OpponentSeed>, B
                 )));
             }
             Ok(OpponentSeed {
-                first: parse_opponent_member(&row, 0, 3, 7, line_number)?,
-                second: parse_opponent_member(&row, 1, 4, 11, line_number)?,
-                third: parse_opponent_member(&row, 2, 5, 15, line_number)?,
+                first: parse_member(&row, "first", 0, 3, 7, line_number)?,
+                second: parse_member(&row, "second", 1, 4, 11, line_number)?,
+                third: parse_member(&row, "third", 2, 5, 15, line_number)?,
             })
         })
         .collect()
+}
+
+/// Loads project opponent rows using the canonical move table. Names are exact
+/// case matches; `none` remains 255 and move slots are packed little-endian.
+pub fn load_opponents_csv_with_moves(
+    path: impl AsRef<Path>,
+    moves: &[Move],
+) -> Result<Vec<OpponentSeed>, BuildError> {
+    let path = path.as_ref();
+    let mut ids = HashMap::new();
+    let mut ambiguous = std::collections::HashSet::new();
+    for movement in moves {
+        // `none` has a CSV sentinel encoding (255), independent of its
+        // placeholder row in moves.json.
+        if movement.name == "none" {
+            continue;
+        }
+        let id = u8::try_from(movement.id)
+            .ok()
+            .filter(|id| *id != 255)
+            .ok_or_else(|| {
+                BuildError(format!(
+                    "{}: invalid canonical move ID {} for {:?}",
+                    path.display(),
+                    movement.id,
+                    movement.name
+                ))
+            })?;
+        if ids.insert(movement.name.as_str(), id).is_some() {
+            ambiguous.insert(movement.name.as_str());
+        }
+    }
+    load_opponents_csv_with(path, |row, member, id_col, level_col, moves_col, line| {
+        let context = |message: String| {
+            BuildError(format!(
+                "{}:{line}: {member} party member: {message}",
+                path.display()
+            ))
+        };
+        let creature_id = creature_id(row[id_col])
+            .ok_or_else(|| context(format!("unknown creature {:?}", row[id_col])))?;
+        let level = row[level_col]
+            .parse::<u8>()
+            .map_err(|err| context(format!("invalid level {:?}: {err}", row[level_col])))?;
+        let mut packed = 0u32;
+        for offset in 0..4 {
+            let name = row[moves_col + offset];
+            let move_id = if name == "none" {
+                255
+            } else if ambiguous.contains(name) {
+                return Err(context(format!(
+                    "moves[{}] has ambiguous move name {name:?}",
+                    offset + 1
+                )));
+            } else {
+                *ids.get(name).ok_or_else(|| {
+                    context(format!("moves[{}] has unknown move {name:?}", offset + 1))
+                })?
+            };
+            packed |= u32::from(move_id) << (offset * 8);
+        }
+        Ok(OpponentPartyMember {
+            creature_id,
+            level,
+            moves: packed,
+        })
+    })
 }
 
 /// Produces `opponents.bin`: three little-endian `<BBI` records per opponent.
@@ -1780,6 +1858,102 @@ mod tests {
         .expect_err("injected divergence must fail");
         assert!(err.0.contains("offset 1"), "{err}");
         assert!(err.0.contains("expected 0xBB"), "{err}");
+    #[test]
+    fn canonical_opponent_loader_preserves_legacy_fixture_bytes() {
+        let legacy = load_opponents_csv(OPPONENTS_CSV).expect("legacy fixture parses");
+        let canonical_moves = [
+            canonical_move(0, "smite"),
+            canonical_move(1, "thought"),
+            canonical_move(23, "zap"),
+            canonical_move(31, "elderSlam"),
+        ];
+        let canonical = load_opponents_csv_with_moves(OPPONENTS_CSV, &canonical_moves)
+            .expect("canonical fixture parses");
+        assert_eq!(build_opponents(&canonical), build_opponents(&legacy));
+    }
+
+    fn canonical_move(id: i32, name: &str) -> Move {
+        Move {
+            id,
+            name: name.to_owned(),
+            r#type: "water".to_owned(),
+            power: 0,
+            physical: 0,
+            accuracy: 100,
+            effect: String::new(),
+        }
+    }
+
+    fn write_test_opponents(contents: &str) -> std::path::PathBuf {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let path = std::env::temp_dir().join(format!(
+            "cgfx-opponents-{}-{}.csv",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::write(&path, contents).expect("write opponent test csv");
+        path
+    }
+
+    #[test]
+    fn canonical_opponent_loader_resolves_new_names_and_packs_little_endian() {
+        let csv = format!(
+            "{}\nsquibblesnail,none,none,31,0,0,fixture,deepthought,Ironbody,Sharpen,rejuvinate,none,none,none,none,none,none,none,none\n",
+            "c1,c2,c3,l1,l2,l3,name,c1m1,c1m2,c1m3,c1m4,c2m1,c2m2,c2m3,c2m4,c3m1,c3m2,c3m3,c3m4"
+        );
+        let path = write_test_opponents(&csv);
+        let moves = [
+            canonical_move(42, "deepthought"),
+            canonical_move(41, "Ironbody"),
+            canonical_move(37, "Sharpen"),
+            canonical_move(43, "rejuvinate"),
+            canonical_move(43, "none"),
+        ];
+        let opponents =
+            load_opponents_csv_with_moves(&path, &moves).expect("canonical names parse");
+        std::fs::remove_file(&path).expect("remove opponent test csv");
+
+        assert_eq!(opponents.len(), 1);
+        assert_eq!(opponents[0].first.moves, 0x2B_25_29_2A);
+        assert_eq!(opponents[0].second.moves, 0xFFFF_FFFF);
+        assert_eq!(opponents[0].third.moves, 0xFFFF_FFFF);
+    }
+
+    #[test]
+    fn canonical_opponent_loader_reports_path_line_member_and_move_slot() {
+        let csv = "c1,c2,c3,l1,l2,l3,name,c1m1,c1m2,c1m3,c1m4,c2m1,c2m2,c2m3,c2m4,c3m1,c3m2,c3m3,c3m4\nsquibblesnail,none,none,31,0,0,fixture,known,Missing,none,none,none,none,none,none,none,none,none,none\n";
+        let path = write_test_opponents(csv);
+        let err = load_opponents_csv_with_moves(&path, &[canonical_move(3, "known")])
+            .expect_err("unknown move rejected");
+        std::fs::remove_file(&path).expect("remove opponent test csv");
+        assert!(err.0.contains(&path.display().to_string()), "{err}");
+        assert!(err.0.contains(":2: first party member:"), "{err}");
+        assert!(
+            err.0.contains("moves[2] has unknown move \"Missing\""),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn canonical_opponent_loader_rejects_ambiguous_names_and_reserved_ids() {
+        let csv = "c1,c2,c3,l1,l2,l3,name,c1m1,c1m2,c1m3,c1m4,c2m1,c2m2,c2m3,c2m4,c3m1,c3m2,c3m3,c3m4\nsquibblesnail,none,none,31,0,0,fixture,same,none,none,none,none,none,none,none,none,none,none,none\n";
+        let path = write_test_opponents(csv);
+        let ambiguous = [canonical_move(1, "same"), canonical_move(2, "same")];
+        let err =
+            load_opponents_csv_with_moves(&path, &ambiguous).expect_err("ambiguous name rejected");
+        assert!(err.0.contains("ambiguous move name \"same\""), "{err}");
+        let out_of_range = [canonical_move(255, "same")];
+        let err =
+            load_opponents_csv_with_moves(&path, &out_of_range).expect_err("reserved ID rejected");
+        assert!(err.0.contains("invalid canonical move ID 255"), "{err}");
+        let too_large = [canonical_move(300, "same")];
+        let err =
+            load_opponents_csv_with_moves(&path, &too_large).expect_err("ID beyond u8 rejected");
+        assert!(err.0.contains("invalid canonical move ID 300"), "{err}");
+        std::fs::remove_file(&path).expect("remove opponent test csv");
+    }
+
         assert!(err.0.contains("actual 0xCC"), "{err}");
         assert!(
             err.0.contains("python3 opponent_data.py --format fx"),

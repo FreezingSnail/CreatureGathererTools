@@ -459,7 +459,7 @@ fn run_project_with_options(
     builder::write_moves(&cfg, &moves).with_context(|| "Writing move artifacts")?;
 
     let opponents_csv = project_root.join("data/opponents.csv");
-    let opponents = builder::load_opponents_csv(&opponents_csv)
+    let opponents = builder::load_opponents_csv_with_moves(&opponents_csv, &moves)
         .with_context(|| format!("Loading opponents from {}", opponents_csv.display()))?;
     let arena_demo = cfg
         .arena_demo
