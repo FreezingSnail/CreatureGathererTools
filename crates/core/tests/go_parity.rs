@@ -48,6 +48,7 @@ fn load_creatures() -> Vec<creaturevm::model::Creature> {
         npc_tileset_png: String::new(),
         output_dir: String::new(),
         fixture_dir: None,
+        arena_demo: None,
         fx_layout: None,
         blocks_json: None,
     };
@@ -66,6 +67,7 @@ fn load_moves() -> Vec<creaturevm::model::Move> {
         npc_tileset_png: String::new(),
         output_dir: String::new(),
         fixture_dir: None,
+        arena_demo: None,
         fx_layout: None,
         blocks_json: None,
     };

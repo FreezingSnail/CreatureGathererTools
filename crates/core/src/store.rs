@@ -128,6 +128,7 @@ mod tests {
             npc_tileset_png: String::new(),
             output_dir: String::new(),
             fixture_dir: None,
+            arena_demo: None,
             fx_layout: None,
             blocks_json: None,
         }
@@ -265,6 +266,7 @@ mod tests {
             npc_tileset_png: String::new(),
             output_dir: String::new(),
             fixture_dir: None,
+            arena_demo: None,
             fx_layout: None,
             blocks_json: None,
         };
@@ -293,6 +295,7 @@ mod tests {
             npc_tileset_png: String::new(),
             output_dir: String::new(),
             fixture_dir: None,
+            arena_demo: None,
             fx_layout: None,
             blocks_json: None,
         };
@@ -317,6 +320,7 @@ mod tests {
             npc_tileset_png: String::new(),
             output_dir: String::new(),
             fixture_dir: None,
+            arena_demo: None,
             fx_layout: None,
             blocks_json: None,
         };

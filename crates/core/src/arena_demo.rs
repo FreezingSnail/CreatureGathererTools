@@ -6,6 +6,8 @@ use serde::Deserialize;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+use crate::fxpack::font::{self, Atlas};
+
 const EMPTY_PLAYER_MOVE: u8 = 32;
 const EMPTY_OPPONENT_MOVE: u8 = 255;
 const MAX_LIST_ITEMS: usize = 255;
@@ -338,6 +340,244 @@ pub fn load(
         path.parent().unwrap_or_else(|| Path::new(".")).join(font)
     };
     Ok(catalog)
+}
+
+/// Emits the production arena descriptor, symbolic IDs, and optional fixture
+/// expectations from one already validated catalog.
+pub fn emit(
+    catalog: &Catalog,
+    output_dir: &Path,
+    fixture_dir: Option<&Path>,
+) -> anyhow::Result<()> {
+    let atlas = Atlas::load(&catalog.label_font, 5, 6, 0).map_err(|error| {
+        anyhow::anyhow!(
+            "loading arena label font {}: {error}",
+            catalog.label_font.display()
+        )
+    })?;
+    let mut labels = Vec::with_capacity(catalog.players.len() + catalog.opponents.len());
+    let label_sources = catalog
+        .players
+        .iter()
+        .map(|team| (format!("player_{}", team.key), team.label.as_str()))
+        .chain(
+            catalog
+                .opponents
+                .iter()
+                .map(|team| (format!("opponent_{}", team.key), team.label.as_str())),
+        );
+    for (symbol, text) in label_sources {
+        let rendered = font::render_strings(&atlas, &[(symbol.clone(), text.to_owned())], 2)
+            .map_err(|error| anyhow::anyhow!("rendering arena label {symbol}: {error}"))?
+            .pop()
+            .expect("one label produces one image");
+        let sheet = rendered.sheet;
+        if sheet.height != 8 || sheet.width > 95 || sheet.frames != 2 {
+            anyhow::bail!(
+                "arena label {symbol} has unsupported geometry {}x{}, {} frames (expected height 8, width <=95, 2 frames)",
+                sheet.width,
+                sheet.height,
+                sheet.frames
+            );
+        }
+        labels.push((symbol, sheet));
+    }
+
+    std::fs::create_dir_all(output_dir)
+        .map_err(|error| anyhow::anyhow!("creating {}: {error}", output_dir.display()))?;
+    let mut descriptor = String::from("namespace ArenaDemoData {\n\n");
+    let members = catalog
+        .players
+        .iter()
+        .flat_map(|team| team.members)
+        .flat_map(|member| {
+            [
+                member.species,
+                member.level,
+                member.move_ids[0],
+                member.move_ids[1],
+                member.move_ids[2],
+                member.move_ids[3],
+            ]
+        });
+    write_byte_array(&mut descriptor, "playerMembers", members);
+    write_byte_array(
+        &mut descriptor,
+        "opponentTrainerIds",
+        catalog.opponents.iter().map(|team| team.trainer_id),
+    );
+    write_byte_array(
+        &mut descriptor,
+        "opponentSpecies",
+        catalog.opponents.iter().flat_map(|team| team.species),
+    );
+    for (symbol, sheet) in &labels {
+        write_byte_array(&mut descriptor, symbol, sheet.bytes.iter().copied());
+    }
+    write_pointer_table(
+        &mut descriptor,
+        "playerLabels",
+        catalog
+            .players
+            .iter()
+            .map(|team| format!("player_{}", team.key)),
+    );
+    write_pointer_table(
+        &mut descriptor,
+        "opponentLabels",
+        catalog
+            .opponents
+            .iter()
+            .map(|team| format!("opponent_{}", team.key)),
+    );
+    write_byte_array(
+        &mut descriptor,
+        "playerLabelWidths",
+        catalog
+            .players
+            .iter()
+            .map(|team| label_width(&labels, "player", &team.key)),
+    );
+    write_byte_array(
+        &mut descriptor,
+        "opponentLabelWidths",
+        catalog
+            .opponents
+            .iter()
+            .map(|team| label_width(&labels, "opponent", &team.key)),
+    );
+    descriptor.push_str("\n} namespace_end\n");
+    std::fs::write(output_dir.join("arena_demo.txt"), descriptor)
+        .map_err(|error| anyhow::anyhow!("writing arena_demo.txt: {error}"))?;
+    std::fs::write(output_dir.join("arena_demo_ids.hpp"), ids_header(catalog))
+        .map_err(|error| anyhow::anyhow!("writing arena_demo_ids.hpp: {error}"))?;
+    if let Some(fixture_dir) = fixture_dir {
+        std::fs::create_dir_all(fixture_dir)
+            .map_err(|error| anyhow::anyhow!("creating {}: {error}", fixture_dir.display()))?;
+        std::fs::write(
+            fixture_dir.join("arena_demo_data.hpp"),
+            fixture_header(catalog),
+        )
+        .map_err(|error| anyhow::anyhow!("writing arena_demo_data.hpp: {error}"))?;
+    }
+    Ok(())
+}
+
+fn label_width(labels: &[(String, crate::fxpack::sprite::Sheet)], kind: &str, key: &str) -> u8 {
+    labels
+        .iter()
+        .find(|(name, _)| name == &format!("{kind}_{key}"))
+        .and_then(|(_, sheet)| u8::try_from(sheet.width).ok())
+        .expect("label width was validated")
+}
+
+fn write_byte_array(name: &mut String, symbol: &str, bytes: impl IntoIterator<Item = u8>) {
+    use std::fmt::Write as _;
+    let values: Vec<_> = bytes.into_iter().collect();
+    let _ = write!(name, "uint8_t {symbol}[] = {{");
+    for (index, byte) in values.iter().enumerate() {
+        if index == 0 {
+            name.push('\n');
+        }
+        if index % 16 == 0 {
+            name.push_str("    ");
+        }
+        let _ = write!(name, "{byte}");
+        if index + 1 < values.len() {
+            name.push(',');
+        }
+        if index % 16 == 15 || index + 1 == values.len() {
+            name.push('\n');
+        } else {
+            name.push(' ');
+        }
+    }
+    name.push_str("};\n\n");
+}
+
+fn write_pointer_table(
+    name: &mut String,
+    symbol: &str,
+    pointers: impl IntoIterator<Item = String>,
+) {
+    use std::fmt::Write as _;
+    let values: Vec<_> = pointers.into_iter().collect();
+    let _ = writeln!(name, "uint24_t {symbol}[] = {{ {} }};\n", values.join(", "));
+}
+
+fn ids_header(catalog: &Catalog) -> String {
+    use std::fmt::Write as _;
+    let mut output =
+        String::from("#pragma once\n#include <stdint.h>\n\nnamespace ArenaDemoIds {\n");
+    let _ = writeln!(
+        output,
+        "constexpr uint8_t playerCount = {};",
+        catalog.players.len()
+    );
+    let _ = writeln!(
+        output,
+        "constexpr uint8_t opponentCount = {};",
+        catalog.opponents.len()
+    );
+    output.push_str("constexpr uint8_t MemberBytes = 6;\nconstexpr uint8_t PlayerBytes = 18;\nconstexpr uint8_t OpponentSpeciesBytes = 3;\n");
+    for (index, team) in catalog.players.iter().enumerate() {
+        let _ = writeln!(output, "constexpr uint8_t player_{} = {index};", team.key);
+    }
+    for (index, team) in catalog.opponents.iter().enumerate() {
+        let _ = writeln!(output, "constexpr uint8_t opponent_{} = {index};", team.key);
+        let _ = writeln!(
+            output,
+            "constexpr uint8_t trainer_{} = {};",
+            team.key, team.trainer_id
+        );
+    }
+    output.push_str("} // namespace ArenaDemoIds\n");
+    output
+}
+
+fn fixture_header(catalog: &Catalog) -> String {
+    use std::fmt::Write as _;
+    let mut output =
+        String::from("#pragma once\n#include <stdint.h>\n\nnamespace ArenaDemoFixture {\n");
+    for team in &catalog.players {
+        let values = team
+            .members
+            .iter()
+            .flat_map(|member| {
+                [
+                    member.species,
+                    member.level,
+                    member.move_ids[0],
+                    member.move_ids[1],
+                    member.move_ids[2],
+                    member.move_ids[3],
+                ]
+            })
+            .map(|value| value.to_string())
+            .collect::<Vec<_>>();
+        let _ = writeln!(
+            output,
+            "const uint8_t player_{}[] = {{ {} }};",
+            team.key,
+            values.join(", ")
+        );
+    }
+    for team in &catalog.opponents {
+        let species = team.species.iter().map(u8::to_string).collect::<Vec<_>>();
+        let _ = writeln!(
+            output,
+            "constexpr uint8_t trainer_{} = {};",
+            team.key, team.trainer_id
+        );
+        let _ = writeln!(
+            output,
+            "const uint8_t opponent_{}[] = {{ {} }};",
+            team.key,
+            species.join(", ")
+        );
+    }
+    output.push_str("} // namespace ArenaDemoFixture\n");
+    output
 }
 
 #[cfg(test)]

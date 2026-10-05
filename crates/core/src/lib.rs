@@ -461,6 +461,24 @@ fn run_project_with_options(
     let opponents_csv = project_root.join("data/opponents.csv");
     let opponents = builder::load_opponents_csv(&opponents_csv)
         .with_context(|| format!("Loading opponents from {}", opponents_csv.display()))?;
+    let arena_demo = cfg
+        .arena_demo
+        .as_deref()
+        .map(|path| arena_demo::load(path, &creatures, &moves, &opponents))
+        .transpose()
+        .with_context(|| "Loading arena demo catalog")?;
+    if let Some(catalog) = &arena_demo {
+        arena_demo::emit(
+            catalog,
+            Path::new(&cfg.output_dir),
+            if emit_fixtures {
+                cfg.fixture_dir.as_deref().map(Path::new)
+            } else {
+                None
+            },
+        )
+        .with_context(|| "Emitting arena demo catalog")?;
+    }
     builder::write_fx_descriptors(&cfg.output_dir, &creatures, &moves, &opponents)
         .with_context(|| "Writing FX text descriptors")?;
 
@@ -534,6 +552,23 @@ fn run_project_with_options(
         manifest::ArtifactInput::in_output(output_dir, "locations.hpp", map_source),
         manifest::ArtifactInput::in_output(output_dir, "scripts.hpp", map_source),
     ];
+    if let (Some(source), Some(catalog)) = (cfg.arena_demo.as_deref(), arena_demo.as_ref()) {
+        let source = Path::new(source);
+        artifact_inputs.push(manifest::ArtifactInput::in_output(
+            output_dir,
+            "arena_demo.txt",
+            source,
+        ));
+        artifact_inputs.push(manifest::ArtifactInput::in_output(
+            output_dir,
+            "arena_demo_ids.hpp",
+            source,
+        ));
+        artifact_inputs.push(manifest::ArtifactInput::external(
+            &catalog.label_font,
+            source,
+        ));
+    }
     if canonical_creature.is_file() {
         let canonical = canonical_creature
             .canonicalize()
