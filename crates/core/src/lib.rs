@@ -498,11 +498,14 @@ fn run_project_with_options(
         let arena_csv = project_root.join("data/arena.csv");
         let arena = arena::parse_arena_csv(&arena_csv)
             .with_context(|| format!("Loading arena from {}", arena_csv.display()))?;
+        let map_artifacts = builder::build_map(&map)?;
         let processed = fixtures::FixtureProject {
             creatures: &creatures,
             moves: &moves,
             opponents: &opponents,
             arena: &arena,
+            map: &map,
+            scripts: &map_artifacts.scripts_bin,
         };
         fixtures::emit_fixtures(&processed, fixture_dir)
             .with_context(|| format!("Writing fixtures to {fixture_dir}"))?;
