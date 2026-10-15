@@ -27,6 +27,8 @@ pub struct Config {
         skip_serializing_if = "Option::is_none"
     )]
     pub arena_demo: Option<String>,
+    #[serde(default, rename = "duel", skip_serializing_if = "Option::is_none")]
+    pub duel: Option<String>,
     #[serde(default, rename = "fx_layout", skip_serializing_if = "Option::is_none")]
     pub fx_layout: Option<String>,
     /// Project-level tile block library shared by the map editor and WFC.
@@ -74,6 +76,9 @@ impl Config {
         }
         if let Some(arena_demo) = &mut self.arena_demo {
             resolve_relative_path(arena_demo, config_dir);
+        }
+        if let Some(duel) = &mut self.duel {
+            resolve_relative_path(duel, config_dir);
         }
         if let Some(fx_layout) = &mut self.fx_layout {
             resolve_relative_path(fx_layout, config_dir);
@@ -135,6 +140,7 @@ mod tests {
         );
         assert_eq!(cfg.fx_layout, None);
         assert_eq!(cfg.arena_demo, None);
+        assert_eq!(cfg.duel, None);
         assert_eq!(
             cfg.blocks_json,
             Some(base.join("blocks.json").to_string_lossy().into_owned()),
@@ -158,7 +164,7 @@ mod tests {
             r#"{"creatures_json":"c.json","moves_json":"m.json","map_json":"map.json",
                 "tileset_png":"t.png","map_tileset_png":"t.png","npc_tileset_png":"n.png",
                 "output_dir":"out","blocks_json":"data/json/blocks.json",
-                "arena_demo":"config/arena-demo.toml"}"#,
+                "arena_demo":"config/arena-demo.toml","duel":"config/duel.toml"}"#,
         )
         .expect("write manifest");
 
@@ -178,6 +184,15 @@ mod tests {
             Some(
                 directory
                     .join("config/arena-demo.toml")
+                    .to_string_lossy()
+                    .into_owned()
+            )
+        );
+        assert_eq!(
+            cfg.duel,
+            Some(
+                directory
+                    .join("config/duel.toml")
                     .to_string_lossy()
                     .into_owned()
             )

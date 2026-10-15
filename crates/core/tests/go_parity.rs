@@ -49,6 +49,7 @@ fn load_creatures() -> Vec<creaturevm::model::Creature> {
         output_dir: String::new(),
         fixture_dir: None,
         arena_demo: None,
+        duel: None,
         fx_layout: None,
         blocks_json: None,
     };
@@ -68,6 +69,7 @@ fn load_moves() -> Vec<creaturevm::model::Move> {
         output_dir: String::new(),
         fixture_dir: None,
         arena_demo: None,
+        duel: None,
         fx_layout: None,
         blocks_json: None,
     };

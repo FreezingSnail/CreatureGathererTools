@@ -4,6 +4,7 @@ pub mod blocks;
 pub mod builder;
 pub mod cli;
 pub mod config;
+pub mod duel;
 pub mod fixtures;
 pub mod fxpack;
 pub mod manifest;
@@ -467,6 +468,12 @@ fn run_project_with_options(
         .map(|path| arena_demo::load(path, &creatures, &moves, &opponents))
         .transpose()
         .with_context(|| "Loading arena demo catalog")?;
+    let duel = cfg
+        .duel
+        .as_deref()
+        .map(|path| duel::load(path, &creatures, &moves, &opponents))
+        .transpose()
+        .with_context(|| "Loading duel data")?;
     if let Some(catalog) = &arena_demo {
         arena_demo::emit(
             catalog,
@@ -478,6 +485,18 @@ fn run_project_with_options(
             },
         )
         .with_context(|| "Emitting arena demo catalog")?;
+    }
+    if let Some(catalog) = &duel {
+        duel::emit(
+            catalog,
+            Path::new(&cfg.output_dir),
+            if emit_fixtures {
+                cfg.fixture_dir.as_deref().map(Path::new)
+            } else {
+                None
+            },
+        )
+        .with_context(|| "Emitting duel data")?;
     }
     builder::write_fx_descriptors(&cfg.output_dir, &creatures, &moves, &opponents)
         .with_context(|| "Writing FX text descriptors")?;
@@ -566,6 +585,19 @@ fn run_project_with_options(
         ));
         artifact_inputs.push(manifest::ArtifactInput::external(
             &catalog.label_font,
+            source,
+        ));
+    }
+    if let Some(source) = cfg.duel.as_deref().filter(|_| duel.is_some()) {
+        let source = Path::new(source);
+        artifact_inputs.push(manifest::ArtifactInput::in_output(
+            output_dir,
+            "duel.txt",
+            source,
+        ));
+        artifact_inputs.push(manifest::ArtifactInput::in_output(
+            output_dir,
+            "duel_ids.hpp",
             source,
         ));
     }

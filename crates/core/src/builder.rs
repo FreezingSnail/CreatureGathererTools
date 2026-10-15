@@ -1384,6 +1384,7 @@ mod tests {
             output_dir: format!("{TD}/testdata/builder_out/{output_dir}"),
             fixture_dir: None,
             arena_demo: None,
+            duel: None,
             fx_layout: None,
             blocks_json: None,
         }
