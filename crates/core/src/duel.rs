@@ -43,8 +43,40 @@ struct Source {
     fold: Fold,
     personas: Personas,
     #[serde(default)]
+    demo: Demo,
+    #[serde(default)]
     trainer: Vec<SourceTrainer>,
     team: Vec<SourceTeam>,
+}
+
+// Demo-encounter persona/rate for the arena sample/random teams. Defaults match
+// the canonical mock window (reader @ 45%). Beta encounters keep their own
+// authored [[trainer]] entries.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Demo {
+    #[serde(default = "Demo::default_persona")]
+    persona: String,
+    #[serde(default = "Demo::default_rate")]
+    rate: u8,
+}
+
+impl Demo {
+    fn default_persona() -> String {
+        "reader".to_owned()
+    }
+    fn default_rate() -> u8 {
+        45
+    }
+}
+
+impl Default for Demo {
+    fn default() -> Self {
+        Demo {
+            persona: Demo::default_persona(),
+            rate: Demo::default_rate(),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -140,6 +172,8 @@ pub struct Catalog {
     pub trainers: Vec<TrainerEntry>,
     pub overrides: Vec<SlotOverride>,
     pub teams: Vec<Team>,
+    pub demo_persona: u8,
+    pub demo_rate: u8,
 }
 
 fn valid_key(key: &str) -> bool {
@@ -371,6 +405,19 @@ pub fn parse(
         }
     }
 
+    let demo_persona = persona_id(&parsed.demo.persona).ok_or_else(|| {
+        BuildError(format!(
+            "duel demo persona {:?} is not one of random/reader/frequency/anti_repeat",
+            parsed.demo.persona
+        ))
+    })?;
+    if parsed.demo.rate >= MAX_RATE {
+        return Err(BuildError(format!(
+            "duel demo rate {} must be < {MAX_RATE}",
+            parsed.demo.rate
+        )));
+    }
+
     // Per-move folded attack type, indexed by authored move id. Gaps and
     // utility/status/none slots stay NO_TYPE.
     let mut max_move_id = 0i32;
@@ -599,6 +646,8 @@ pub fn parse(
         trainers,
         overrides,
         teams,
+        demo_persona,
+        demo_rate: parsed.demo.rate,
     })
 }
 
@@ -676,6 +725,8 @@ pub fn emit(
         "duelTrainerRate",
         catalog.trainers.iter().map(|entry| entry.rate),
     ));
+    descriptor.push_str(&byte_block("duelDemoPersona", [catalog.demo_persona]));
+    descriptor.push_str(&byte_block("duelDemoRate", [catalog.demo_rate]));
     descriptor.push_str(&byte_block(
         "duelTrainerOverrides",
         catalog
@@ -762,6 +813,16 @@ fn ids_header(catalog: &Catalog) -> String {
         catalog.teams.len()
     );
     output.push_str("constexpr uint8_t speciesBytes = 3;\nconstexpr uint8_t trainerOverrideBytes = 5;\nconstexpr uint8_t teamSlots = 3;\nconstexpr uint8_t teamMemberBytes = 5;\n");
+    let _ = writeln!(
+        output,
+        "constexpr uint8_t demoPersona = {};",
+        catalog.demo_persona
+    );
+    let _ = writeln!(
+        output,
+        "constexpr uint8_t demoRate = {};",
+        catalog.demo_rate
+    );
     for (index, team) in catalog.teams.iter().enumerate() {
         let _ = writeln!(output, "constexpr uint8_t team_{} = {index};", team.key);
     }
@@ -838,6 +899,16 @@ fn fixture_header(catalog: &Catalog) -> String {
         output,
         "const uint8_t duelTrainerRate[] = {{ {} }};",
         values(catalog.trainers.iter().map(|entry| entry.rate).collect())
+    );
+    let _ = writeln!(
+        output,
+        "const uint8_t duelDemoPersona[] = {{ {} }};",
+        values(vec![catalog.demo_persona])
+    );
+    let _ = writeln!(
+        output,
+        "const uint8_t duelDemoRate[] = {{ {} }};",
+        values(vec![catalog.demo_rate])
     );
     let _ = writeln!(
         output,
@@ -1035,6 +1106,29 @@ types = ["water"]
     }
 
     #[test]
+    fn demo_persona_rate_default_reader_45_and_accept_explicit() {
+        let (creatures, moves, opponents) = models();
+        // VALID omits [demo], so the canonical mock window default applies.
+        let catalog = parse(VALID, &creatures, &moves, &opponents).unwrap();
+        assert_eq!(catalog.demo_persona, 1, "reader");
+        assert_eq!(catalog.demo_rate, 45);
+
+        let source = format!("{VALID}\n[demo]\npersona = \"frequency\"\nrate = 50\n");
+        let catalog = parse(&source, &creatures, &moves, &opponents).unwrap();
+        assert_eq!(catalog.demo_persona, 2, "frequency");
+        assert_eq!(catalog.demo_rate, 50);
+
+        reject(
+            &format!("{VALID}\n[demo]\npersona = \"boss\"\n"),
+            "is not one of",
+        );
+        reject(
+            &format!("{VALID}\n[demo]\nrate = 75\n"),
+            "must be < 75",
+        );
+    }
+
+    #[test]
     fn dedupes_secondary_folded_type_and_allows_missing_retype() {
         let (creatures, moves, opponents) = models();
         let catalog = parse(VALID, &creatures, &moves, &opponents).unwrap();
@@ -1199,9 +1293,13 @@ types = ["water"]
         assert!(ids.contains("constexpr uint8_t team_balanced = 0;"));
         assert!(ids.contains("constexpr uint8_t teamSlots = 3;"));
         assert!(ids.contains("constexpr uint8_t teamMemberBytes = 5;"));
+        assert!(ids.contains("constexpr uint8_t demoPersona = 1;"));
+        assert!(ids.contains("constexpr uint8_t demoRate = 45;"));
         let fixture = fixture_header(&catalog);
         assert!(fixture.contains("const uint8_t duelMoveTypes[]"));
         assert!(fixture.contains("const uint8_t duelTeamMembers[]"));
+        assert!(fixture.contains("const uint8_t duelDemoPersona[] = { 1 };"));
+        assert!(fixture.contains("const uint8_t duelDemoRate[] = { 45 };"));
         assert!(fixture.contains("constexpr uint8_t teamSlots = 3;"));
     }
 }
