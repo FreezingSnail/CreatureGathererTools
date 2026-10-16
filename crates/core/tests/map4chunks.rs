@@ -23,7 +23,6 @@ const TILED: &str = concat!(
 fn fixture_cfg() -> Config {
     Config {
         creatures_json: String::new(),
-        moves_json: String::new(),
         map_json: CANONICAL.to_string(),
         tileset_png: String::new(),
         map_tileset_png: String::new(),

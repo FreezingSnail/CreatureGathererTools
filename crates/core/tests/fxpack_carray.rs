@@ -162,26 +162,6 @@ fn declarations(path: &str) -> Vec<Declaration> {
     enumerate_declarations(&game_source(path)).unwrap()
 }
 
-fn assert_declaration(
-    declarations: &[Declaration],
-    index: usize,
-    name: &str,
-    namespace: Option<&str>,
-    ctype: CType,
-    line: u32,
-) {
-    let declaration = &declarations[index];
-    assert_eq!(declaration.name, name, "index {index}");
-    assert_eq!(declaration.namespace.as_deref(), namespace, "index {index}");
-    assert_eq!(declaration.ctype, ctype, "index {index}");
-    assert_eq!(declaration.line, line, "index {index}");
-    assert_eq!(
-        declaration.bytes.is_some(),
-        ctype == CType::U8,
-        "index {index}"
-    );
-}
-
 fn assert_source_order(declarations: &[Declaration]) {
     assert!(
         declarations
@@ -191,120 +171,213 @@ fn assert_source_order(declarations: &[Declaration]) {
     );
 }
 
-#[test]
-fn enumerates_real_generated_sprite_declarations() {
-    let declarations = declarations("fxdata/generated/Sprites.txt");
+/// `uint8_t` declarations carry decoded bytes; `uint24_t`/`uint32_t`
+/// declarations retain source metadata only.
+fn assert_bytes_follow_ctype(declarations: &[Declaration]) {
+    for declaration in declarations {
+        assert_eq!(
+            declaration.bytes.is_some(),
+            declaration.ctype == CType::U8,
+            "{} must carry bytes only for uint8_t",
+            declaration.name
+        );
+        if let Some(bytes) = &declaration.bytes {
+            assert!(!bytes.is_empty(), "{} decoded no bytes", declaration.name);
+        }
+    }
+}
 
-    assert_eq!(declarations.len(), 130);
-    assert_source_order(&declarations);
-    assert_declaration(&declarations, 0, "amove20", None, CType::U8, 1);
-    assert_declaration(&declarations, 52, "plant", None, CType::U8, 439);
-    assert_declaration(
-        &declarations,
-        123,
-        "CreatureNames",
-        Some("CreatureNames"),
-        CType::U24,
-        1046,
-    );
-    assert_declaration(
-        &declarations,
-        126,
-        "EffectStrings",
-        Some("EffectStrings"),
-        CType::U24,
-        1055,
+fn named<'a>(declarations: &'a [Declaration], name: &str) -> &'a Declaration {
+    declarations
+        .iter()
+        .find(|declaration| declaration.name == name)
+        .unwrap_or_else(|| panic!("declaration {name:?} not found"))
+}
+
+/// The parser reports the one-based line that names the declaration, so every
+/// declaration must land on a real line that contains its name.
+fn assert_lines_name_their_declarations(path: &str, declarations: &[Declaration]) {
+    let source = std::fs::read_to_string(game_source(path)).expect("game source reads");
+    let lines: Vec<&str> = source.lines().collect();
+    for declaration in declarations {
+        let line = lines
+            .get(declaration.line as usize - 1)
+            .unwrap_or_else(|| {
+                panic!(
+                    "{}: reported line {} is outside {}",
+                    declaration.name, declaration.line, path
+                )
+            });
+        assert!(
+            line.contains(&declaration.name),
+            "{}: line {} does not name the declaration: {line:?}",
+            declaration.name,
+            declaration.line
+        );
+    }
+}
+
+/// Every `uint8_t`/`uint24_t`/`uint32_t` source line is enumerated. This stays
+/// self-consistent as the generated row count changes: it asserts the parser's
+/// coverage rather than a frozen count.
+fn assert_source_declarations_are_exhaustive(path: &str, declarations: &[Declaration]) {
+    let source = std::fs::read_to_string(game_source(path)).expect("game source reads");
+    let lines: Vec<&str> = source.lines().collect();
+    let typed = |line: &str| {
+        let trimmed = line.trim_start();
+        ["uint8_t", "uint24_t", "uint32_t"].iter().any(|token| {
+            trimmed
+                .strip_prefix(token)
+                .and_then(|rest| rest.chars().next())
+                .is_some_and(char::is_whitespace)
+        })
+    };
+    let typed_lines = lines.iter().filter(|line| typed(line)).count();
+    let typed_declarations = declarations
+        .iter()
+        .filter(|declaration| {
+            lines
+                .get(declaration.line as usize - 1)
+                .is_some_and(|line| typed(line))
+        })
+        .count();
+    assert_eq!(
+        typed_lines, typed_declarations,
+        "{path}: every typed source line must be enumerated"
     );
 }
 
-#[test]
-fn enumerates_real_move_declarations() {
-    let declarations = declarations("fxdata/generated/moves.txt");
-
-    assert_eq!(declarations.len(), 45);
+/// Asserts the shared structural invariants for a generated C-array source,
+/// then returns the declarations for test-specific semantics.
+fn real_declarations(path: &str) -> Vec<Declaration> {
+    let declarations = declarations(path);
+    assert!(!declarations.is_empty(), "{path} declares nothing");
     assert_source_order(&declarations);
-    assert_declaration(&declarations, 0, "move0", Some("MoveData"), CType::U8, 2);
-    assert_declaration(&declarations, 22, "move22", Some("MoveData"), CType::U8, 24);
-    assert_declaration(
-        &declarations,
-        44,
-        "moveNames",
-        Some("MoveData"),
-        CType::U24,
-        47,
+    assert_bytes_follow_ctype(&declarations);
+    assert_lines_name_their_declarations(path, &declarations);
+    assert_source_declarations_are_exhaustive(path, &declarations);
+    declarations
+}
+
+#[test]
+fn enumerates_real_generated_sprite_declarations() {
+    let declarations = real_declarations("fxdata/generated/Sprites.txt");
+
+    // Sprite byte tables sit outside any namespace; the generated source opens
+    // with one.
+    assert_eq!(declarations[0].namespace, None);
+    assert_eq!(declarations[0].ctype, CType::U8);
+
+    // Every trailing typed pointer table lives in a namespace of the same name
+    // and carries no decoded bytes.
+    assert!(
+        declarations.iter().any(|d| d.ctype == CType::U24),
+        "generated sprites carry typed pointer tables"
     );
+    for declaration in declarations.iter().filter(|d| d.ctype == CType::U24) {
+        assert_eq!(
+            declaration.namespace.as_deref(),
+            Some(declaration.name.as_str()),
+            "typed table {} must sit in its own namespace",
+            declaration.name
+        );
+    }
+    assert_eq!(declarations.last().unwrap().ctype, CType::U24);
+
+    let creature_names = named(&declarations, "CreatureNames");
+    assert_eq!(creature_names.namespace.as_deref(), Some("CreatureNames"));
+    assert_eq!(creature_names.ctype, CType::U24);
+    assert_eq!(creature_names.bytes, None);
+}
+
+#[test]
+fn enumerates_real_attack_mask_declarations() {
+    let declarations = real_declarations("fxdata/generated/attackMask.txt");
+
+    assert_eq!(declarations.len(), 1, "one folded attack-mask table");
+    let mask = named(&declarations, "attackMask");
+    assert_eq!(mask.namespace.as_deref(), Some("AttackMasks"));
+    assert_eq!(mask.ctype, CType::U8);
+    assert!(mask.bytes.as_ref().is_some_and(|bytes| !bytes.is_empty()));
 }
 
 #[test]
 fn enumerates_real_menu_declarations() {
-    let declarations = declarations("fxdata/data/menu.txt");
+    let declarations = real_declarations("fxdata/data/menu.txt");
 
-    assert_eq!(declarations.len(), 37);
-    assert_source_order(&declarations);
-    assert_declaration(
-        &declarations,
-        0,
-        "attackText",
-        Some("MenuFXData"),
-        CType::U8,
-        2,
+    assert!(
+        declarations
+            .iter()
+            .all(|d| d.namespace.as_deref() == Some("MenuFXData") && d.ctype == CType::U8),
+        "every menu string lives in MenuFXData"
     );
-    assert_declaration(&declarations, 18, "NONE", Some("MenuFXData"), CType::U8, 20);
-    assert_declaration(
-        &declarations,
-        36,
-        "gather",
-        Some("MenuFXData"),
-        CType::U8,
-        38,
+    // C-string tables decode to their content plus a NUL terminator.
+    assert_eq!(
+        named(&declarations, "NONE").bytes.as_deref(),
+        Some(&[0u8][..])
+    );
+    assert_eq!(
+        named(&declarations, "gather").bytes.as_deref(),
+        Some(&b"gather\0"[..])
     );
 }
 
 #[test]
 fn enumerates_real_team_declarations() {
-    let declarations = declarations("fxdata/generated/teams.txt");
+    let declarations = real_declarations("fxdata/generated/teams.txt");
 
-    assert_eq!(declarations.len(), 35);
-    assert_source_order(&declarations);
-    assert_declaration(
-        &declarations,
-        0,
-        "null",
-        Some("Teams::StockCreatures"),
-        CType::U8,
-        3,
+    assert_eq!(
+        declarations[0].namespace.as_deref(),
+        Some("Teams::StockCreatures")
     );
-    assert_declaration(
-        &declarations,
-        32,
-        "ardu",
-        Some("Teams::StockCreatures"),
-        CType::U8,
-        35,
-    );
-    assert_declaration(&declarations, 34, "teamList", Some("Teams"), CType::U24, 43);
+    // Every stock-creature row is a two-byte {id, attack mask} pair.
+    for declaration in declarations
+        .iter()
+        .filter(|d| d.namespace.as_deref() == Some("Teams::StockCreatures"))
+    {
+        assert_eq!(declaration.ctype, CType::U8);
+        assert_eq!(
+            declaration.bytes.as_ref().map(Vec::len),
+            Some(2),
+            "{} is an {{id, mask}} stock row",
+            declaration.name
+        );
+    }
+    let team_list = named(&declarations, "teamList");
+    assert_eq!(team_list.namespace.as_deref(), Some("Teams"));
+    assert_eq!(team_list.ctype, CType::U24);
+    assert_eq!(declarations.last().unwrap().name, "teamList");
 }
 
 #[test]
 fn enumerates_real_legacy_sprite_declarations() {
-    let declarations = declarations("fxdata/Sprites.txt");
+    let declarations = real_declarations("fxdata/Sprites.txt");
 
-    assert_eq!(declarations.len(), 22);
-    assert_source_order(&declarations);
-    assert_declaration(&declarations, 0, "numbersblack", None, CType::U8, 1);
-    assert_declaration(&declarations, 10, "moveInfo", None, CType::U8, 1974);
-    assert_declaration(&declarations, 21, "letters", None, CType::U8, 5130);
+    assert!(
+        declarations
+            .iter()
+            .all(|d| d.ctype == CType::U8 && d.namespace.is_none()),
+        "legacy sprite source is namespace-free uint8_t tables"
+    );
 }
 
 #[test]
 fn enumerates_real_opponent_declarations() {
-    let declarations = declarations("fxdata/generated/opponents.txt");
+    let declarations = real_declarations("fxdata/generated/opponents.txt");
 
-    assert_eq!(declarations.len(), 20);
-    assert_source_order(&declarations);
-    assert_declaration(&declarations, 0, "opponent_seeds", None, CType::U8, 1);
-    assert_declaration(&declarations, 10, "opponent_seed_10", None, CType::U8, 61);
-    assert_declaration(&declarations, 19, "opts", None, CType::U24, 115);
+    assert!(declarations.iter().all(|d| d.namespace.is_none()));
+    // Each seed table is three little-endian {id, level, mask} records.
+    for declaration in declarations.iter().filter(|d| d.ctype == CType::U8) {
+        assert_eq!(
+            declaration.bytes.as_ref().map(Vec::len),
+            Some(9),
+            "{} is a three-member seed table",
+            declaration.name
+        );
+    }
+    let opts = named(&declarations, "opts");
+    assert_eq!(opts.ctype, CType::U24);
+    assert_eq!(opts.namespace, None);
 }
 
 #[test]
@@ -367,26 +440,22 @@ fn enumerates_legacy_untyped_symbolic_tables() {
 
 #[test]
 fn enumerates_real_event_declarations_including_legacy_table() {
-    let declarations = declarations("fxdata/data/event.txt");
+    let declarations = real_declarations("fxdata/data/event.txt");
 
-    assert_eq!(declarations.len(), 10);
-    assert_source_order(&declarations);
-    assert_declaration(
-        &declarations,
-        8,
-        "m1Table",
-        Some("EventData"),
-        CType::U24,
-        18,
+    assert!(
+        declarations
+            .iter()
+            .all(|d| d.namespace.as_deref() == Some("EventData")),
+        "every event declaration shares EventData"
     );
-    assert_declaration(
-        &declarations,
-        9,
-        "eventTable",
-        Some("EventData"),
-        CType::U24,
-        23,
-    );
+    // The legacy untyped table is canonicalized to a uint24_t reference that
+    // shares the namespace of the typed tables.
+    let legacy = named(&declarations, "m1Table");
+    assert_eq!(legacy.ctype, CType::U24);
+    assert_eq!(legacy.bytes, None);
+    let typed = named(&declarations, "eventTable");
+    assert_eq!(typed.ctype, CType::U24);
+    assert_eq!(typed.namespace, legacy.namespace);
 }
 
 #[test]

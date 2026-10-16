@@ -66,7 +66,6 @@ fn arena_temp_project() -> (PathBuf, PathBuf, PathBuf, PathBuf) {
         format!(
             r#"{{
                 "creatures_json": "{}/creatures.json",
-                "moves_json": "{}/moves.json",
                 "map_json": "map.json",
                 "tileset_png": "",
                 "map_tileset_png": "",
@@ -74,7 +73,7 @@ fn arena_temp_project() -> (PathBuf, PathBuf, PathBuf, PathBuf) {
                 "output_dir": "generated",
                 "arena_demo": "arena/arena-demo.toml"
             }}"#,
-            TESTDATA, TESTDATA
+            TESTDATA
         ),
     )
     .expect("write project config");
@@ -86,7 +85,7 @@ fn arena_temp_project() -> (PathBuf, PathBuf, PathBuf, PathBuf) {
     std::fs::write(
         root.join("data/opponents.csv"),
         "c1,c2,c3,l1,l2,l3,name,c1m1,c1m2,c1m3,c1m4,c2m1,c2m2,c2m3,c2m4,c3m1,c3m2,c3m3,c3m4\n\
-         squibblesnail,squibblesnail,squibblesnail,31,31,31,fixture,smite,none,none,none,smite,none,none,none,smite,none,none,none\n",
+         squibblesnail,squibblesnail,squibblesnail,31,31,31,fixture,water,none,none,none,water,none,none,none,water,none,none,none\n",
     )
     .expect("write opponents CSV");
     write_arena_source(&arena, "Starter");
@@ -107,17 +106,17 @@ label = "{label}"
 [[player_team.members]]
 species = "SquibbleSnail"
 level = 31
-moves = ["smite", "none", "none", "none"]
+moves = ["water", "none", "none", "none"]
 
 [[player_team.members]]
 species = "SquibbleSnail"
 level = 31
-moves = ["smite", "none", "none", "none"]
+moves = ["water", "none", "none", "none"]
 
 [[player_team.members]]
 species = "SquibbleSnail"
 level = 31
-moves = ["smite", "none", "none", "none"]
+moves = ["water", "none", "none", "none"]
 
 [[opponent_team]]
 key = "rival"

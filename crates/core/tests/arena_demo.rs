@@ -35,17 +35,17 @@ fn catalog(font: PathBuf) -> Catalog {
                     Member {
                         species: 0,
                         level: 31,
-                        move_ids: [10, 32, 32, 32],
+                        attack_mask: 10,
                     },
                     Member {
                         species: 3,
                         level: 30,
-                        move_ids: [11, 32, 32, 32],
+                        attack_mask: 11,
                     },
                     Member {
                         species: 6,
                         level: 29,
-                        move_ids: [12, 32, 32, 32],
+                        attack_mask: 12,
                     },
                 ],
             },
@@ -56,17 +56,17 @@ fn catalog(font: PathBuf) -> Catalog {
                     Member {
                         species: 9,
                         level: 20,
-                        move_ids: [13, 32, 32, 32],
+                        attack_mask: 13,
                     },
                     Member {
                         species: 12,
                         level: 21,
-                        move_ids: [14, 32, 32, 32],
+                        attack_mask: 14,
                     },
                     Member {
                         species: 15,
                         level: 22,
-                        move_ids: [15, 32, 32, 32],
+                        attack_mask: 15,
                     },
                 ],
             },
@@ -122,10 +122,7 @@ fn emitter_preserves_catalog_order_geometry_ids_and_fixture_data() {
 
     assert_eq!(
         array_values(&descriptor, "uint8_t playerMembers[]"),
-        vec![
-            0, 31, 10, 32, 32, 32, 3, 30, 11, 32, 32, 32, 6, 29, 12, 32, 32, 32, 9, 20, 13, 32, 32,
-            32, 12, 21, 14, 32, 32, 32, 15, 22, 15, 32, 32, 32,
-        ]
+        vec![0, 31, 10, 3, 30, 11, 6, 29, 12, 9, 20, 13, 12, 21, 14, 15, 22, 15]
     );
     assert_eq!(
         array_values(&descriptor, "uint8_t opponentTrainerIds[]"),
@@ -175,16 +172,17 @@ fn emitter_preserves_catalog_order_geometry_ids_and_fixture_data() {
 
     assert!(ids.contains("constexpr uint8_t playerCount = 2;"));
     assert!(ids.contains("constexpr uint8_t opponentCount = 2;"));
-    assert!(ids.contains("constexpr uint8_t MemberBytes = 6;"));
-    assert!(ids.contains("constexpr uint8_t PlayerBytes = 18;"));
+    assert!(ids.contains("constexpr uint8_t MemberBytes = 3;"));
+    assert!(ids.contains("constexpr uint8_t PlayerBytes = 9;"));
+    assert!(ids.contains("constexpr uint8_t OpponentSpeciesBytes = 3;"));
     assert!(ids.contains("constexpr uint8_t player_starter = 0;"));
     assert!(ids.contains("constexpr uint8_t player_reserve = 1;"));
     assert!(ids.contains("constexpr uint8_t opponent_rival = 0;"));
     assert!(ids.contains("constexpr uint8_t opponent_champion = 1;"));
     assert!(ids.contains("constexpr uint8_t trainer_rival = 4;"));
     assert!(ids.contains("constexpr uint8_t trainer_champion = 7;"));
-    assert!(fixture.contains("player_starter[] = { 0, 31, 10, 32, 32, 32, 3, 30"));
-    assert!(fixture.contains("player_reserve[] = { 9, 20, 13, 32, 32, 32"));
+    assert!(fixture.contains("player_starter[] = { 0, 31, 10, 3, 30, 11, 6, 29, 12 }"));
+    assert!(fixture.contains("player_reserve[] = { 9, 20, 13, 12, 21, 14, 15, 22, 15 }"));
     assert!(fixture.contains("trainer_champion = 7;"));
     assert!(fixture.contains("opponent_champion[] = { 9, 12, 15 }"));
 

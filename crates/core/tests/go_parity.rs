@@ -14,8 +14,8 @@
 //!    compared byte-for-byte with the Go-built bytes, including a map that
 //!    exercises every DSL command (msg/tmsg/smsg/tp/tpif/if/sf/usf/rf).
 //! 2. Empty map parity (no NPCs, no scripts).
-//! 3. Creatures + moves pipeline: `Store` fixture load → `build_creatures` /
-//!    `build_moves` → exact Go reference bytes.
+//! 3. Creatures pipeline: `Store` fixture load → `build_creatures` → exact Go
+//!    reference bytes.
 //! 4. Tiled interchange end-to-end on the original creaturevm-rust fixture
 //!    (`tests/world_map.json`): `tiled::import` → `tiled::export` →
 //!    `tiled::import` round-trips to an equal `GameMap`.
@@ -25,7 +25,7 @@
 use std::collections::HashMap;
 use std::fs;
 
-use creaturevm::builder::{build_creatures, build_map, build_moves};
+use creaturevm::builder::{build_creatures, build_map};
 use creaturevm::config::Config;
 use creaturevm::model::{GameMap, NPCObject, ScriptObject};
 use creaturevm::script::{self, Controller, ToBytecode};
@@ -41,7 +41,6 @@ fn read_fixture(rel: &str) -> String {
 fn load_creatures() -> Vec<creaturevm::model::Creature> {
     let cfg = Config {
         creatures_json: format!("{TD}/testdata/creatures.json"),
-        moves_json: format!("{TD}/testdata/moves.json"),
         map_json: format!("{TD}/testdata/map.json"),
         tileset_png: String::new(),
         map_tileset_png: String::new(),
@@ -57,25 +56,6 @@ fn load_creatures() -> Vec<creaturevm::model::Creature> {
     Store::new(&cfg)
         .load_creatures()
         .expect("creatures fixture parses")
-}
-
-fn load_moves() -> Vec<creaturevm::model::Move> {
-    let cfg = Config {
-        creatures_json: format!("{TD}/testdata/creatures.json"),
-        moves_json: format!("{TD}/testdata/moves.json"),
-        map_json: format!("{TD}/testdata/map.json"),
-        tileset_png: String::new(),
-        map_tileset_png: String::new(),
-        npc_tileset_png: String::new(),
-        output_dir: String::new(),
-        fixture_dir: None,
-        battle_presets: None,
-        arena_demo: None,
-        duel: None,
-        fx_layout: None,
-        blocks_json: None,
-    };
-    Store::new(&cfg).load_moves().expect("moves fixture parses")
 }
 
 fn empty_map() -> GameMap {
@@ -330,25 +310,17 @@ fn creatures_pipeline_matches_go_bytes() {
     let creatures = load_creatures();
     let (bin, hpp) = build_creatures(&creatures).expect("build_creatures");
     // Go reference (creatures_test.go + fixtures): SquibbleSnail then NewOne.
+    // Records are 11 bytes: id, type1, type2, evo, atk, def, spc_atk, spc_def,
+    // hp, spd, folded attack mask (Go type encoding: none = 8).
     assert_eq!(
         bin,
         vec![
-            0, 2, 8, 8, 3, 3, 2, 2, 3, 3, 8, 32, 32, 32, // SquibbleSnail
-            99, 8, 8, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, // NewOne
+            0, 2, 8, 8, 3, 3, 2, 2, 3, 3, 2, // SquibbleSnail (water mask)
+            99, 8, 8, 1, 1, 1, 1, 1, 1, 1, 1, // NewOne (spirit mask)
         ]
     );
     assert!(hpp.contains("uint8_t creatureData[]"));
-    assert!(hpp.contains("{0, 2, 8, 8, 3, 3, 2, 2, 3, 3, 8, 32, 32, 32},"));
-}
-
-#[test]
-fn moves_pipeline_matches_go_bytes() {
-    let moves = load_moves();
-    let (bin, hpp) = build_moves(&moves).expect("build_moves");
-    // Go reference: smite packed=0x0500 + NONE/NONE; thought packed=0x02C0 + NONE/NONE.
-    assert_eq!(bin, vec![0x05, 0x00, 0xFF, 0xFF, 0x02, 0xC0, 0xFF, 0xFF]);
-    assert!(hpp.contains("uint8_t move0[] = \"smite\\0\";"));
-    assert!(hpp.contains("uint8_t move1[] = \"thought\\0\";"));
+    assert!(hpp.contains("{0, 2, 8, 8, 3, 3, 2, 2, 3, 3, 2},"));
 }
 
 // ─────────────────────────────────────────────────────────────────────
