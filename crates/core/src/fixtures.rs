@@ -41,6 +41,11 @@ pub fn emit_fixtures(
     )?;
     write(
         dir,
+        "evolution_data.hpp",
+        evolution_header(processed.creatures)?,
+    )?;
+    write(
+        dir,
         "opponent_data.hpp",
         opponent_header(processed.opponents),
     )?;
@@ -102,6 +107,39 @@ fn creature_header(creatures: &[Creature]) -> Result<String, BuildError> {
         "constexpr uint8_t creatureFixtureCount = {};\n",
         creatures.len()
     ));
+    Ok(output)
+}
+
+fn evolution_header(creatures: &[Creature]) -> Result<String, BuildError> {
+    let edges = crate::evolution::validate_evolutions(creatures)?;
+    let array = |values: Vec<i32>| {
+        values
+            .iter()
+            .map(|value| value.to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let mut output =
+        format!("{BANNER}#pragma once\n#include <stdint.h>\n#include <avr/pgmspace.h>\n\n");
+    output.push_str("// Model fixture for the packed Evolution edge mapping.\n");
+    output.push_str("namespace EvolutionFixture {\n");
+    output.push_str(&format!(
+        "const uint8_t evolutionSource[] PROGMEM = {{ {} }};\n",
+        array(edges.iter().map(|edge| edge.from_id).collect())
+    ));
+    output.push_str(&format!(
+        "const uint8_t evolutionTarget[] PROGMEM = {{ {} }};\n",
+        array(edges.iter().map(|edge| edge.to_id).collect())
+    ));
+    output.push_str(&format!(
+        "const uint8_t evolutionLevel[] PROGMEM = {{ {} }};\n",
+        array(edges.iter().map(|edge| edge.level).collect())
+    ));
+    output.push_str(&format!(
+        "constexpr uint8_t evolutionEdgeCount = {};\n",
+        edges.len()
+    ));
+    output.push_str("} // namespace EvolutionFixture\n");
     Ok(output)
 }
 

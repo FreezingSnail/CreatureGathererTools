@@ -721,6 +721,7 @@ mod tests {
             spc_def: 4,
             hp: 5,
             spd: 6,
+            evolves_to: None,
             moves: vec!["water".to_string()],
         };
         let v: serde_json::Value = serde_json::to_value(&c).unwrap();
@@ -732,6 +733,13 @@ mod tests {
             assert!(o.contains_key(key), "missing key {key}");
         }
         assert!(!o.contains_key("evo_level"));
+        // An absent target is omitted rather than written as JSON null so the
+        // canonical files stay byte-stable; a present target uses `evolves_to`.
+        assert!(!o.contains_key("evolves_to"));
+        let mut targeted = c.clone();
+        targeted.evolves_to = Some(2);
+        let v: serde_json::Value = serde_json::to_value(&targeted).unwrap();
+        assert_eq!(v.as_object().unwrap()["evolves_to"], serde_json::json!(2));
 
         let z = EncounterZone {
             id: 1,

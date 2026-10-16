@@ -6,6 +6,7 @@ pub mod builder;
 pub mod cli;
 pub mod config;
 pub mod duel;
+pub mod evolution;
 pub mod fixtures;
 pub mod fxpack;
 pub mod manifest;
@@ -550,6 +551,7 @@ fn run_project_with_options(
         manifest::ArtifactInput::in_output(output_dir, "creatureData.hpp", creature_source),
         manifest::ArtifactInput::in_output(output_dir, "creatureData.txt", creature_source),
         manifest::ArtifactInput::in_output(output_dir, "attackMask.txt", creature_source),
+        manifest::ArtifactInput::in_output(output_dir, "evolution.txt", creature_source),
         manifest::ArtifactInput::in_output(output_dir, "opponents.txt", &opponents_csv),
         manifest::ArtifactInput::in_output(output_dir, "raw_map.bin", map_source),
         manifest::ArtifactInput::in_output(output_dir, "map.bin", map_source),

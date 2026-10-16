@@ -122,6 +122,12 @@ pub struct Creature {
     pub spc_def: i32,
     pub hp: i32,
     pub spd: i32,
+    /// Explicit first-stage evolution target species id (jp8.11.11), or `None`
+    /// when the species does not evolve at this revision. `id + 1` is not a
+    /// valid relation: the target is authored per species and cross-checked by
+    /// the authoring tool before generation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evolves_to: Option<i32>,
     /// Known attack types (deduped authored names). Empty means no usable
     /// attack (WAIT). The generator folds these to the 5-bit duel mask.
     #[serde(default)]

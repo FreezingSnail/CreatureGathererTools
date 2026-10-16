@@ -240,6 +240,7 @@ moves = ["none"]
             spc_def: 1,
             hp: 1,
             spd: 1,
+            evolves_to: None,
             moves: vec![],
         }
     }

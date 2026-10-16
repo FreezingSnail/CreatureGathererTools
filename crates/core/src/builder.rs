@@ -583,9 +583,14 @@ pub fn write_fx_descriptors(
     let creature_path = output_dir.join("creatureData.txt");
     let mask_path = output_dir.join("attackMask.txt");
     let opponent_path = output_dir.join("opponents.txt");
+    let evolution_path = output_dir.join("evolution.txt");
     write_str(&creature_path, &build_fx_creature_descriptor(creatures)?)?;
     write_str(&mask_path, &build_fx_attack_mask_descriptor(creatures))?;
-    write_str(&opponent_path, &build_fx_opponents_descriptor(opponents))
+    write_str(&opponent_path, &build_fx_opponents_descriptor(opponents))?;
+    write_str(
+        &evolution_path,
+        &crate::evolution::build_fx_evolution_descriptor(creatures)?,
+    )
 }
 
 // ─────────────────────────────────────────────────────────────────────
