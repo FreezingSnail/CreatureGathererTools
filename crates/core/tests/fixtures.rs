@@ -10,8 +10,12 @@ use std::fs;
 const TESTDATA: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata");
 
 fn read(name: &str) -> String {
-    fs::read_to_string(std::env::temp_dir().join(format!("cgfx-tools-fixtures-{}", std::process::id())).join(name))
-        .expect("fixture header must be emitted")
+    fs::read_to_string(
+        std::env::temp_dir()
+            .join(format!("cgfx-tools-fixtures-{}", std::process::id()))
+            .join(name),
+    )
+    .expect("fixture header must be emitted")
 }
 
 #[test]
@@ -43,7 +47,9 @@ fn emitted_headers_are_model_derived_and_device_structural() {
             script: "msg {fixture}".into(),
         })
         .collect();
-    let script_bytes = builder::build_map(&map).expect("fixture map builds").scripts_bin;
+    let script_bytes = builder::build_map(&map)
+        .expect("fixture map builds")
+        .scripts_bin;
     let opponents =
         load_opponents_csv(format!("{TESTDATA}/opponents.csv")).expect("opponent model parses");
     let arena = parse_arena_csv(format!("{TESTDATA}/arena.csv")).expect("arena model parses");
@@ -51,7 +57,8 @@ fn emitted_headers_are_model_derived_and_device_structural() {
     // Mutating parsed data before emission proves the emitter does not re-dump
     // any writer artifact: both the packed word and field expectation change.
     moves[0].power = 31;
-    let destination = std::env::temp_dir().join(format!("cgfx-tools-fixtures-{}", std::process::id()));
+    let destination =
+        std::env::temp_dir().join(format!("cgfx-tools-fixtures-{}", std::process::id()));
     emit_fixtures(
         &FixtureProject {
             creatures: &creatures,

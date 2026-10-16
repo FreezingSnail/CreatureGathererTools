@@ -351,17 +351,14 @@ fn map_header(map: &GameMap) -> Result<String, BuildError> {
             }
         }
     }
-    let ordinary = ordinary.ok_or_else(|| {
-        BuildError("map fixtures require an ordinary non-empty cell".into())
-    })?;
-    let high_id = high_id.ok_or_else(|| {
-        BuildError("map fixtures require a tile id above 511".into())
-    })?;
+    let ordinary = ordinary
+        .ok_or_else(|| BuildError("map fixtures require an ordinary non-empty cell".into()))?;
+    let high_id =
+        high_id.ok_or_else(|| BuildError("map fixtures require a tile id above 511".into()))?;
     selected.insert(0, high_id);
     selected.insert(0, ordinary);
-    let mut output = format!(
-        "{BANNER}#pragma once\n#include <stdint.h>\n#include <avr/pgmspace.h>\n\n"
-    );
+    let mut output =
+        format!("{BANNER}#pragma once\n#include <stdint.h>\n#include <avr/pgmspace.h>\n\n");
     output.push_str("struct MapWordFixture { uint16_t index; uint16_t word; };\n");
     output.push_str("const MapWordFixture mapWordFixtures[] PROGMEM = {\n");
     for fixture in &selected {
@@ -388,9 +385,8 @@ fn script_header(scripts: &[u8]) -> Result<String, BuildError> {
             SLOT_BYTES * SLOT_COUNT
         )));
     }
-    let mut output = format!(
-        "{BANNER}#pragma once\n#include <stdint.h>\n#include <avr/pgmspace.h>\n\n"
-    );
+    let mut output =
+        format!("{BANNER}#pragma once\n#include <stdint.h>\n#include <avr/pgmspace.h>\n\n");
     output.push_str("struct ScriptSlotFixture { uint16_t chunk; uint8_t prefix[4]; };\n");
     output.push_str("const ScriptSlotFixture scriptSlotFixtures[] PROGMEM = {\n");
     let mut count = 0u16;
@@ -405,7 +401,9 @@ fn script_header(scripts: &[u8]) -> Result<String, BuildError> {
         }
     }
     output.push_str("};\n");
-    output.push_str(&format!("constexpr uint16_t scriptSlotFixtureCount = {count};\n"));
+    output.push_str(&format!(
+        "constexpr uint16_t scriptSlotFixtureCount = {count};\n"
+    ));
     output.push_str("struct ScriptAddressFixture { uint16_t chunk; uint8_t offset[3]; };\n");
     output.push_str("const ScriptAddressFixture scriptAddressFixtures[] PROGMEM = {\n");
     for chunk in [3u16, 512, 2047] {

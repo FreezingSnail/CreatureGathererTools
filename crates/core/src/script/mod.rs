@@ -254,7 +254,10 @@ fn parse_tp(
     // Existing Tiled maps use `tp from to` for the conditional two-location
     // form. Preserve the one-location `tp to` form and emit TpIf whenever a
     // second location immediately follows, matching the explicit `tpif` ABI.
-    let next_is_location = matches!(lex.clone().next()?.kind, TokenKind::At(_) | TokenKind::Number(_));
+    let next_is_location = matches!(
+        lex.clone().next()?.kind,
+        TokenKind::At(_) | TokenKind::Number(_)
+    );
     if next_is_location {
         let to = parse_location(lex, locations, controller)?;
         Ok(Cmd::TpIf {

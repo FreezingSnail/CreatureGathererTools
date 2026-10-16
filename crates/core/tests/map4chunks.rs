@@ -30,6 +30,7 @@ fn fixture_cfg() -> Config {
         npc_tileset_png: String::new(),
         output_dir: format!("{TD}/testdata/builder_out/map4chunks"),
         fixture_dir: None,
+        battle_presets: None,
         arena_demo: None,
         duel: None,
         fx_layout: None,
@@ -199,13 +200,40 @@ fn tiled_location_markers_resolve_without_becoming_scripts() {
         .load_map()
         .expect("Tiled fixture parses through Store");
     map.npcs = vec![
-        NPCObject { id: 7, x: 12, y: 7, sprite_id: 0, script: "@test_house".into() },
-        NPCObject { id: 9, x: 4, y: 4, sprite_id: 0, script: "@test_teleport".into() },
+        NPCObject {
+            id: 7,
+            x: 12,
+            y: 7,
+            sprite_id: 0,
+            script: "@test_house".into(),
+        },
+        NPCObject {
+            id: 9,
+            x: 4,
+            y: 4,
+            sprite_id: 0,
+            script: "@test_teleport".into(),
+        },
     ];
     map.scripts = vec![
-        ScriptObject { id: 1, x: 0, y: 4, script: "tp @test_teleport @test_house;".into() },
-        ScriptObject { id: 2, x: 8, y: 4, script: "tp @test_house @test_teleport;".into() },
-        ScriptObject { id: 3, x: 2, y: 2, script: "if flag_door then tp 1 1 0 0 endif;".into() },
+        ScriptObject {
+            id: 1,
+            x: 0,
+            y: 4,
+            script: "tp @test_teleport @test_house;".into(),
+        },
+        ScriptObject {
+            id: 2,
+            x: 8,
+            y: 4,
+            script: "tp @test_house @test_teleport;".into(),
+        },
+        ScriptObject {
+            id: 3,
+            x: 2,
+            y: 2,
+            script: "if flag_door then tp 1 1 0 0 endif;".into(),
+        },
     ];
     let artifacts = builder::build_map(&map).expect("location references resolve");
 
@@ -214,9 +242,21 @@ fn tiled_location_markers_resolve_without_becoming_scripts() {
     assert!(artifacts.scripts_hpp.contains("uint8_t blob0[]"));
     assert!(artifacts.scripts_hpp.contains("uint8_t blob32[]"));
     assert!(artifacts.scripts_hpp.contains("uint8_t blob33[]"));
-    assert!(artifacts.scripts_hpp.contains("// tp @test_teleport @test_house;"));
-    assert!(artifacts.scripts_hpp.contains("// tp @test_house @test_teleport;"));
-    assert!(artifacts.scripts_hpp.contains("// if flag_door then tp 1 1 0 0 endif;"));
+    assert!(
+        artifacts
+            .scripts_hpp
+            .contains("// tp @test_teleport @test_house;")
+    );
+    assert!(
+        artifacts
+            .scripts_hpp
+            .contains("// tp @test_house @test_teleport;")
+    );
+    assert!(
+        artifacts
+            .scripts_hpp
+            .contains("// if flag_door then tp 1 1 0 0 endif;")
+    );
     assert_eq!(
         &artifacts.scripts_bin[32 * 128..32 * 128 + 9],
         &[4, 0, 4, 0, 4, 0, 12, 0, 7],
@@ -228,8 +268,10 @@ fn tiled_location_markers_resolve_without_becoming_scripts() {
         "tp @test_house @test_teleport resolves to both marker coordinates",
     );
     for chunk in [0usize, 32, 33] {
-        assert!(artifacts.scripts_bin[chunk * 128..(chunk + 1) * 128]
-            .iter()
-            .any(|&byte| byte != 0));
+        assert!(
+            artifacts.scripts_bin[chunk * 128..(chunk + 1) * 128]
+                .iter()
+                .any(|&byte| byte != 0)
+        );
     }
 }

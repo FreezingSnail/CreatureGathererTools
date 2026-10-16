@@ -6,6 +6,17 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
+/// Reproducible generator identity: crate version plus the built source
+/// revision (`build.rs` folds `git rev-parse --short=8 HEAD` into
+/// `CGFX_TOOLS_REVISION`). Two builds of the same revision share a token; a
+/// different revision, or a git-less build (`+gunknown`), differs. This is the
+/// single token that both `cgfx-tools --version` and the manifest record.
+pub const TOOL_IDENTITY: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    "+g",
+    env!("CGFX_TOOLS_REVISION"),
+);
+
 /// One generated artifact and the input that produced it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Artifact {
@@ -70,7 +81,7 @@ pub fn emit(output_dir: &Path, artifacts: &[ArtifactInput]) -> anyhow::Result<()
         })
         .collect::<anyhow::Result<Vec<_>>>()?;
     let manifest = Manifest {
-        tool_version: format!("cgfx-tools {}", env!("CARGO_PKG_VERSION")),
+        tool_version: format!("cgfx-tools {}", TOOL_IDENTITY),
         generated_at: Utc::now().to_rfc3339(),
         artifacts,
     };

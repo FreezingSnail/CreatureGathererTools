@@ -145,8 +145,9 @@ game content into engine-ready artifacts:
 - **Parity with the reference Go implementation** — integration tests assert zero
   discrepancy against the Go toolchain; the port must stay behavior-identical.
 - **Offline, single-machine workflow** — no network services; everything runs
-  locally; game data lives in a sibling checkout (`CreatureGathererFX`), wired in
-  via `src-tauri/creature-tools.json` config.
+  locally; game data lives in a sibling checkout (`CreatureGathererFX`), selected
+  at startup via a project manifest (`creature-tools.json` in the chosen project,
+  or any JSON manifest picked directly).
 
 ## Architecture
 
@@ -192,11 +193,11 @@ CLI + reusable library. Pipeline stages (see `src/main.rs`):
    (`bin.rs`, 24-bit little-endian via `u24.rs`). Binary layout: text block
    (offset table + ASCII blob) + bytecode block, padded to 256-byte alignment.
 
-Supporting modules: `builder.rs`, `store.rs`, `config.rs`, `tiled.rs`, `model.rs`
-(domain types: `Creature`, `GameMap`, `Move`), and `wfcmap/`. `wfcmap` persists
-`GameMap.wfc` project data, including serde-default count/exclude/border/band rules,
-and `GameMap.stamps` tile blocks; it slices variable-size pieces, compiles sockets,
-anchors and placement presets, then bakes generated hunks. See
+Supporting modules: `builder.rs`, `blocks.rs`, `store.rs`, `config.rs`, `tiled.rs`,
+`model.rs` (domain types: `Creature`, `GameMap`, `Move`), and `wfcmap/`. `wfcmap`
+persists `GameMap.wfc` project data, including serde-default count/exclude/border/band
+rules, and `GameMap.stamps` tile blocks; it slices variable-size pieces, compiles
+sockets, anchors and placement presets, then bakes generated hunks. See
 `crates/core/docs/wfc.md` for the slot model and deterministic generation contract.
 
 ### 4. Domain-free solver — `crates/wfc/` (crate `cgfx-wfc`)
@@ -210,7 +211,7 @@ and memory limits; it has no map, tile, JSON, or filesystem dependency. Core's
 
 ```bash
 # Rust core + shell
-cargo build                                   # workspace: crates/core + src-tauri
+cargo build                                   # workspace: crates/core + crates/wfc + src-tauri
 cargo test                                    # unit + integration tests
 cargo run -p cgfx-core -- <input.json> <output_dir>   # CLI only, no UI
 
@@ -220,8 +221,9 @@ npm run dev                                   # vite dev server (UI only)
 npm test                                      # vitest run
 npm run build                                 # typecheck (tsc) + vite build
 
-# Full desktop app
-npm run tauri dev                             # requires Rust toolchain
+# Full desktop app (from the repo root)
+ui/node_modules/.bin/tauri dev                # requires Rust toolchain
+./install.sh                                  # release build + local install
 ```
 
 Test notes:

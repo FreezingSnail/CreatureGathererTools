@@ -1,4 +1,5 @@
 use creaturevm::manifest::Manifest;
+use creaturevm::manifest::TOOL_IDENTITY;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::fs;
@@ -154,7 +155,7 @@ fn full_project_manifest_lists_complete_hashed_regenerated_artifact_inventory() 
 
     assert_eq!(
         manifest.tool_version,
-        format!("cgfx-tools {}", env!("CARGO_PKG_VERSION"))
+        format!("cgfx-tools {}", TOOL_IDENTITY)
     );
     assert!(
         !manifest.generated_at.is_empty(),

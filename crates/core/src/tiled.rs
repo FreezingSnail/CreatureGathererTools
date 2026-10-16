@@ -45,7 +45,7 @@ use std::fmt;
 
 use serde_json::{Value, json};
 
-use crate::model::{GameMap, NPCObject, ScriptObject};
+use crate::model::{GameMap, NPCObject, ScriptObject, TileSetRef};
 
 /// Tile size in pixels; Tiled object coordinates are pixel-based and the
 /// canonical GameMap model stores tile coordinates.
@@ -85,6 +85,7 @@ pub fn import(json: &str) -> Result<GameMap, TiledError> {
         .get("height")
         .and_then(|v| v.as_u64())
         .ok_or_else(|| TiledError("missing `height`".to_string()))? as u32;
+    let tilesets = parse_tilesets(&root)?;
 
     let mut map_data: Option<Vec<u16>> = None;
     let mut scripts: Option<Vec<ScriptObject>> = None;
@@ -147,6 +148,9 @@ pub fn import(json: &str) -> Result<GameMap, TiledError> {
         width,
         height,
         tiles,
+        tilesets,
+        tile_properties: Default::default(),
+        source_path: None,
         npcs: locations,
         scripts,
         collision,
@@ -270,7 +274,7 @@ pub fn export(map: &GameMap) -> String {
         "renderorder": "right-down",
         "tiledversion": "1.10.2",
         "tileheight": TILE_SIZE as u32,
-        "tilesets": [],
+        "tilesets": map.tilesets.clone(),
         "tilewidth": TILE_SIZE as u32,
         "type": "map",
         "version": "1.10",
@@ -278,6 +282,37 @@ pub fn export(map: &GameMap) -> String {
     });
 
     serde_json::to_string(&value).expect("serializing a Value cannot fail")
+}
+
+fn parse_tilesets(root: &Value) -> Result<Vec<TileSetRef>, TiledError> {
+    let Some(value) = root.get("tilesets") else {
+        return Ok(Vec::new());
+    };
+    let entries = value
+        .as_array()
+        .ok_or_else(|| TiledError("`tilesets` must be an array".to_string()))?;
+    let mut refs = Vec::new();
+    for (index, entry) in entries.iter().enumerate() {
+        // Inline tilesets remain importable; only external sources need a
+        // project-relative path and can be resolved by Store.
+        let Some(source) = entry.get("source").and_then(Value::as_str) else {
+            continue;
+        };
+        let firstgid = entry
+            .get("firstgid")
+            .and_then(Value::as_u64)
+            .and_then(|value| u32::try_from(value).ok())
+            .filter(|value| *value > 0)
+            .ok_or_else(|| TiledError(format!("tileset {index} has invalid `firstgid`")))?;
+        if source.is_empty() {
+            return Err(TiledError(format!("tileset {index} has empty `source`")));
+        }
+        refs.push(TileSetRef {
+            firstgid,
+            source: source.to_string(),
+        });
+    }
+    Ok(refs)
 }
 
 /// Parse the `map` tilelayer's `data` array into flat tile IDs.

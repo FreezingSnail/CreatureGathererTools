@@ -23,6 +23,12 @@ pub struct Config {
     pub fixture_dir: Option<String>,
     #[serde(
         default,
+        rename = "battle_presets",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub battle_presets: Option<String>,
+    #[serde(
+        default,
         rename = "arena_demo",
         skip_serializing_if = "Option::is_none"
     )]
@@ -73,6 +79,9 @@ impl Config {
         resolve_relative_path(&mut self.output_dir, config_dir);
         if let Some(fixture_dir) = &mut self.fixture_dir {
             resolve_relative_path(fixture_dir, config_dir);
+        }
+        if let Some(battle_presets) = &mut self.battle_presets {
+            resolve_relative_path(battle_presets, config_dir);
         }
         if let Some(arena_demo) = &mut self.arena_demo {
             resolve_relative_path(arena_demo, config_dir);

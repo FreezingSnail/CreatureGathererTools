@@ -195,25 +195,25 @@ fn assert_source_order(declarations: &[Declaration]) {
 fn enumerates_real_generated_sprite_declarations() {
     let declarations = declarations("fxdata/generated/Sprites.txt");
 
-    assert_eq!(declarations.len(), 108);
+    assert_eq!(declarations.len(), 130);
     assert_source_order(&declarations);
     assert_declaration(&declarations, 0, "amove20", None, CType::U8, 1);
-    assert_declaration(&declarations, 52, "plant", None, CType::U8, 963);
+    assert_declaration(&declarations, 52, "plant", None, CType::U8, 439);
     assert_declaration(
         &declarations,
-        104,
+        123,
         "CreatureNames",
         Some("CreatureNames"),
         CType::U24,
-        1998,
+        1046,
     );
     assert_declaration(
         &declarations,
-        107,
+        126,
         "EffectStrings",
         Some("EffectStrings"),
         CType::U24,
-        2007,
+        1055,
     );
 }
 
@@ -292,8 +292,8 @@ fn enumerates_real_legacy_sprite_declarations() {
     assert_eq!(declarations.len(), 22);
     assert_source_order(&declarations);
     assert_declaration(&declarations, 0, "numbersblack", None, CType::U8, 1);
-    assert_declaration(&declarations, 10, "moveInfo", None, CType::U8, 5857);
-    assert_declaration(&declarations, 21, "letters", None, CType::U8, 15258);
+    assert_declaration(&declarations, 10, "moveInfo", None, CType::U8, 1974);
+    assert_declaration(&declarations, 21, "letters", None, CType::U8, 5130);
 }
 
 #[test]

@@ -1,0 +1,8 @@
+{
+  "width": 3,
+  "height": 1,
+  "tiles": [[0, 527, 1023]],
+  "tilesets": [{ "firstgid": 1, "source": "tile_properties.tsx" }],
+  "npcs": [],
+  "scripts": []
+}

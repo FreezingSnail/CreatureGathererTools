@@ -1,11 +1,13 @@
 use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;
 
+use crate::manifest::TOOL_IDENTITY;
+
 #[derive(Parser, Debug)]
 #[command(
     name = "cgfx-tools",
     author,
-    version,
+    version = TOOL_IDENTITY,
     about,
     subcommand_negates_reqs = true,
     args_conflicts_with_subcommands = true
@@ -410,7 +412,7 @@ mod tests {
     fn version_banner_uses_stable_binary_name() {
         assert_eq!(
             Cli::command().render_version().to_string(),
-            format!("cgfx-tools {}\n", env!("CARGO_PKG_VERSION"))
+            format!("cgfx-tools {}\n", TOOL_IDENTITY)
         );
     }
 

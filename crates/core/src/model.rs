@@ -12,7 +12,8 @@ pub const TOTAL_CHUNKS: usize = (CHUNK_COLS * CHUNK_ROWS) as usize;
 use crate::processor::ast::Cmd;
 use crate::wfcmap::{Stamp, WfcProject};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
+use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
 pub struct Script {
@@ -204,12 +205,30 @@ pub struct EncounterZone {
     pub creature_ids: Vec<i32>,
 }
 
+/// External Tiled tileset reference, retained in canonical maps so the
+/// project loader can resolve tile properties without changing map GIDs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TileSetRef {
+    pub firstgid: u32,
+    pub source: String,
+}
+
 /// Our own canonical map format (schema we control).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GameMap {
     pub width: u32,
     pub height: u32,
     pub tiles: Vec<Vec<u16>>,
+    /// External tilesets are metadata; `tiles` always retains original GIDs.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tilesets: Vec<TileSetRef>,
+    /// Resolved global GID -> six-bit tile-property mask. This is derived
+    /// from TSX files by Store and never serialized into the canonical map.
+    #[serde(skip)]
+    pub tile_properties: BTreeMap<u16, u8>,
+    /// Source path used for contextual build diagnostics. Not map data.
+    #[serde(skip)]
+    pub source_path: Option<PathBuf>,
     pub npcs: Vec<NPCObject>,
     pub scripts: Vec<ScriptObject>,
     /// 0 = none, else CollisionType.ID

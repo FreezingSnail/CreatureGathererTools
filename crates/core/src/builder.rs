@@ -8,6 +8,8 @@
 //! - `moves.bin`         : 4 bytes per move: packed u16 (big-endian) +
 //!   effect byte + 0xFF effect2 byte.
 //! - `moves.hpp`         : per-move name strings + `moveNames` pointer table.
+//! - `moves.txt`         : byte-identical copy of `moves.hpp`, consumed by the
+//!   FX layout `expand` entry as the MoveData name declarations.
 
 use crate::config::Config;
 use crate::model::{Creature, GameMap, Move};
@@ -465,6 +467,30 @@ fn accuracy_index(accuracy: i32) -> u16 {
     }
 }
 
+/// Authoring HP bound for the one-byte per-instance HP encoding (jp8.11.22):
+/// the firmware derives max HP as `2*level + hpSeed*(level/3) + 30` truncated
+/// to a byte, and stores HP as `0 = legacy/full`, `1..=255 = actualHP + 1`.
+/// Both need `maxHP <= 254` for every supported level, and the seed itself must
+/// fit the one-byte `CreatureData_t.hpSeed` field.
+fn validate_creature_hp(creature: &Creature) -> Result<(), BuildError> {
+    if creature.hp < 0 || creature.hp > 255 {
+        return Err(BuildError(format!(
+            "creature {} HP seed {} is outside the 0..=255 byte range",
+            creature.name, creature.hp
+        )));
+    }
+    for level in 1u8..=31 {
+        let max_hp = 2 * level as i64 + creature.hp as i64 * (level as i64 / 3) + 30;
+        if max_hp > 254 {
+            return Err(BuildError(format!(
+                "creature {} HP seed {} yields max HP {} at level {} above 254",
+                creature.name, creature.hp, max_hp, level
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Mirrors Go `BuildCreatures`: produces the `creatureData.bin` bytes and
 /// the `creatureData.hpp` text for the given creatures.
 pub fn build_creatures(creatures: &[Creature]) -> Result<(Vec<u8>, String), BuildError> {
@@ -472,6 +498,7 @@ pub fn build_creatures(creatures: &[Creature]) -> Result<(Vec<u8>, String), Buil
     let mut table = String::new();
     table.push_str("namespace CreatureData {\n\n    uint8_t creatureData[] = {\n");
     for c in creatures {
+        validate_creature_hp(c)?;
         let t1 = creature_type_byte(&c.type1)
             .ok_or_else(|| BuildError(format!("unknown type for creature {}", c.name)))?;
         let t2 = creature_type_byte(&c.type2)
@@ -562,16 +589,25 @@ pub fn write_creatures(cfg: &Config, creatures: &[Creature]) -> Result<(), Build
     Ok(())
 }
 
-/// Mirrors Go `BuildMoves` file side: writes `moves.bin` and `moves.hpp`
-/// into `cfg.output_dir` (creating it if needed).
+/// Mirrors Go `BuildMoves` file side: writes `moves.bin`, `moves.hpp` and the
+/// `moves.txt` FX name-declaration input into `cfg.output_dir` (creating it if
+/// needed).
+///
+/// `moves.txt` carries exactly the same bytes as `moves.hpp`: the layout's
+/// `expand` entry consumes the name declarations and the `moveNames` pointer
+/// table that the header reproduces. Emitting it here keeps a fresh tracked
+/// checkout able to generate the MoveData input instead of relying on a stale
+/// ignored artifact.
 pub fn write_moves(cfg: &Config, moves: &[Move]) -> Result<(), BuildError> {
     let (bin, hpp) = build_moves(moves)?;
     let dir = Path::new(&cfg.output_dir);
     std::fs::create_dir_all(dir).map_err(|e| io_err("creating", dir, e))?;
     let bin_path = dir.join("moves.bin");
     let hpp_path = dir.join("moves.hpp");
+    let txt_path = dir.join("moves.txt");
     std::fs::write(&bin_path, &bin).map_err(|e| io_err("writing", &bin_path, e))?;
-    std::fs::write(&hpp_path, hpp).map_err(|e| io_err("writing", &hpp_path, e))?;
+    std::fs::write(&hpp_path, &hpp).map_err(|e| io_err("writing", &hpp_path, e))?;
+    std::fs::write(&txt_path, hpp).map_err(|e| io_err("writing", &txt_path, e))?;
     Ok(())
 }
 
@@ -1081,7 +1117,12 @@ pub fn verify_opponents_python_parity(
 // Map builder, ported from creatureTools internal/builder/mapbuilder.go.
 // Go output is the byte-for-byte reference contract:
 //
-// - `raw_map.bin` : 256×256 u16 LE tiles, row-major, out-of-range → 0.
+// - `raw_map.bin` : 256×256 encoded tile+property words, u16 LE row-major,
+//   out-of-range → 0.
+// - `map.bin`     : the same encoded words re-chunked as 2048 chunks × 32
+//   tiles × u16 BIG-endian, addressed by `Chunk::mapChunkAddr` (64 bytes per
+//   chunk) on the device. `raw_map.bin` and `map.bin` always carry identical
+//   words; only the byte order and tile ordering differ.
 // - `scripts.bin` : 2048 chunks × 128 bytes, each non-empty chunk is the
 //   concatenated compiled bytecode followed by an End (0xFF) sentinel.
 // - `text.bin`    : u16 LE count + u16 LE offsets + u16 LE len-prefixed
@@ -1194,8 +1235,11 @@ fn scripts_hpp_text(blobs: &[Vec<u8>], scripts: &[String]) -> String {
 /// NPCObject.script by the importer. Other NPC scripts stay executable.
 fn location_marker(script: &str) -> Option<&str> {
     let name = script.strip_prefix('@')?;
-    (!name.is_empty() && name.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'_'))
-        .then_some(name)
+    (!name.is_empty()
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_'))
+    .then_some(name)
 }
 
 /// Mirrors Go `BuildMap`: compiles the map's NPC + script-object scripts
@@ -1203,7 +1247,7 @@ fn location_marker(script: &str) -> Option<&str> {
 pub fn build_map(map: &GameMap) -> Result<MapArtifacts, BuildError> {
     use crate::model::{CHUNK_COLS, CHUNK_H, CHUNK_W, MAP_H, MAP_W, TOTAL_CHUNKS};
 
-    // raw_map.bin: 256×256 u16 tiles, row-major, little-endian.
+    // raw_map.bin: 256×256 encoded tile words, row-major, little-endian.
     let mut raw_map = vec![0u8; (MAP_W * MAP_H * 2) as usize];
     for row in 0..MAP_H {
         for col in 0..MAP_W {
@@ -1213,9 +1257,35 @@ pub fn build_map(map: &GameMap) -> Result<MapArtifacts, BuildError> {
                 .and_then(|trow| trow.get(col as usize))
                 .copied()
                 .unwrap_or(0);
+            if tile > 0x03FF {
+                let path = map
+                    .source_path
+                    .as_ref()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_else(|| "<map>".to_string());
+                return Err(BuildError(format!(
+                    "{path}: tile ({col},{row}) has GID {tile}, maximum supported GID is 1023"
+                )));
+            }
+            let properties = if tile == 0 {
+                0
+            } else {
+                map.tile_properties.get(&tile).copied().unwrap_or(0)
+            };
+            if properties > 0x3F {
+                let path = map
+                    .source_path
+                    .as_ref()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_else(|| "<map>".to_string());
+                return Err(BuildError(format!(
+                    "{path}: tile ({col},{row}) GID {tile} has invalid property mask {properties}"
+                )));
+            }
+            let encoded = tile | ((properties as u16) << 10);
             let off = ((row * MAP_W + col) * 2) as usize;
-            raw_map[off] = (tile & 0xFF) as u8;
-            raw_map[off + 1] = (tile >> 8) as u8;
+            raw_map[off] = (encoded & 0xFF) as u8;
+            raw_map[off + 1] = (encoded >> 8) as u8;
         }
     }
 
@@ -1226,10 +1296,16 @@ pub fn build_map(map: &GameMap) -> Result<MapArtifacts, BuildError> {
     for npc in &map.npcs {
         if let Some(name) = location_marker(&npc.script) {
             let x = u16::try_from(npc.x).map_err(|_| {
-                BuildError(format!("location @{name} has invalid x coordinate {}", npc.x))
+                BuildError(format!(
+                    "location @{name} has invalid x coordinate {}",
+                    npc.x
+                ))
             })?;
             let y = u16::try_from(npc.y).map_err(|_| {
-                BuildError(format!("location @{name} has invalid y coordinate {}", npc.y))
+                BuildError(format!(
+                    "location @{name} has invalid y coordinate {}",
+                    npc.y
+                ))
             })?;
             locations.insert(name.to_owned(), (x, y));
         }
@@ -1337,6 +1413,30 @@ pub fn build_map(map: &GameMap) -> Result<MapArtifacts, BuildError> {
     })
 }
 
+/// Chunked big-endian `map.bin`: 2048 chunks × 32 tiles × u16 BE, the packed
+/// `map_data` FX field. Re-chunks the `raw_map` words so both artifacts carry
+/// the same encoded tile+property values; the device reads this field with
+/// `Chunk::mapChunkAddr` and the chunk index is `(y/4)*32 + x/8`.
+fn chunk_map_be(raw_map: &[u8]) -> Vec<u8> {
+    use crate::model::{CHUNK_COLS, CHUNK_H, CHUNK_W, MAP_H, MAP_W, TOTAL_CHUNKS};
+
+    let mut out = Vec::with_capacity(TOTAL_CHUNKS * (CHUNK_W * CHUNK_H) as usize * 2);
+    for chunk_y in 0..(MAP_H / CHUNK_H) {
+        for chunk_x in 0..CHUNK_COLS {
+            for tile_y in 0..CHUNK_H {
+                for tile_x in 0..CHUNK_W {
+                    let x = chunk_x * CHUNK_W + tile_x;
+                    let y = chunk_y * CHUNK_H + tile_y;
+                    let off = ((y * MAP_W + x) * 2) as usize;
+                    let word = u16::from_le_bytes([raw_map[off], raw_map[off + 1]]);
+                    out.extend_from_slice(&word.to_be_bytes());
+                }
+            }
+        }
+    }
+    out
+}
+
 /// Mirrors Go `BuildMap` file side: writes all map artifacts into
 /// `cfg.output_dir` (creating it if needed).
 pub fn write_map(cfg: &Config, map: &GameMap) -> Result<(), BuildError> {
@@ -1344,6 +1444,7 @@ pub fn write_map(cfg: &Config, map: &GameMap) -> Result<(), BuildError> {
     let dir = Path::new(&cfg.output_dir);
     std::fs::create_dir_all(dir).map_err(|e| io_err("creating", dir, e))?;
     write_bytes(&dir.join("raw_map.bin"), &a.raw_map)?;
+    write_bytes(&dir.join("map.bin"), &chunk_map_be(&a.raw_map))?;
     write_bytes(&dir.join("scripts.bin"), &a.scripts_bin)?;
     write_bytes(&dir.join("text.bin"), &a.text_bin)?;
     write_str(&dir.join("opcodes.hpp"), &a.opcodes_hpp)?;
@@ -1383,6 +1484,7 @@ mod tests {
             npc_tileset_png: String::new(),
             output_dir: format!("{TD}/testdata/builder_out/{output_dir}"),
             fixture_dir: None,
+            battle_presets: None,
             arena_demo: None,
             duel: None,
             fx_layout: None,
@@ -1577,6 +1679,34 @@ mod tests {
         assert!(err.0.contains("unknown type for creature SquibbleSnail"));
     }
 
+    #[test]
+    fn build_creatures_hp_bound_accepts_level_31_boundary() {
+        // 2*31 + 16*(31/3) + 30 = 252 <= 254.
+        let mut creatures = fixture_creatures();
+        creatures[0].hp = 16;
+        assert!(build_creatures(&creatures).is_ok());
+    }
+
+    #[test]
+    fn build_creatures_hp_bound_rejects_over_254() {
+        // 2*31 + 17*(31/3) + 30 = 262 > 254.
+        let mut creatures = fixture_creatures();
+        creatures[0].hp = 17;
+        let err = build_creatures(&creatures).expect_err("hp bound must error");
+        assert!(err.0.contains("above 254"), "{err}");
+    }
+
+    #[test]
+    fn build_creatures_hp_seed_range_errors() {
+        let mut creatures = fixture_creatures();
+        creatures[0].hp = -1;
+        let err = build_creatures(&creatures).expect_err("negative hp seed");
+        assert!(err.0.contains("0..=255"), "{err}");
+        creatures[0].hp = 256;
+        let err = build_creatures(&creatures).expect_err("hp seed above byte range");
+        assert!(err.0.contains("0..=255"), "{err}");
+    }
+
     // ─── moves.bin: exact bytes from the Go builder (reference contract) ───
     // smite:   type spirit=0, power=10, physical=0, acc=100 -> packed=1280=0x0500
     //          -> [0x05, 0x00, 0xFF(eff NONE), 0xFF(effect2)]
@@ -1704,8 +1834,51 @@ mod tests {
         let bin = std::fs::read(format!("{}/moves.bin", cfg.output_dir)).expect("read bin");
         let hpp =
             std::fs::read_to_string(format!("{}/moves.hpp", cfg.output_dir)).expect("read hpp");
+        let txt =
+            std::fs::read_to_string(format!("{}/moves.txt", cfg.output_dir)).expect("read txt");
         assert_eq!(bin, EXPECTED_MOVES_BIN.to_vec());
         assert_eq!(hpp, EXPECTED_MOVES_HPP);
+        assert_eq!(txt, EXPECTED_MOVES_HPP, "moves.txt mirrors moves.hpp bytes");
+    }
+
+    #[test]
+    fn build_moves_uses_canonical_id_symbols_for_declaration_and_pointers() {
+        // Canonical `data/json/moves.json` gives Deluge id 44 even though it sits
+        // at the 33rd roster position; the emitted symbol must use that id in both
+        // the declaration and the pointer table.
+        let moves = vec![
+            Move {
+                id: 0,
+                name: "smite".to_string(),
+                r#type: "spirit".to_string(),
+                power: 10,
+                physical: 0,
+                accuracy: 100,
+                effect: "NONE".to_string(),
+            },
+            Move {
+                id: 44,
+                name: "Deluge".to_string(),
+                r#type: "none".to_string(),
+                power: 11,
+                physical: 0,
+                accuracy: 100,
+                effect: "NONE".to_string(),
+            },
+        ];
+        let (_, hpp) = build_moves(&moves).expect("build");
+        assert!(
+            hpp.contains("    uint8_t move44[] = \"Deluge\\0\";\n"),
+            "Deluge must declare the canonical move{{id}} symbol:\n{hpp}"
+        );
+        assert!(
+            !hpp.contains("move32"),
+            "canonical emission must not fall back to roster-position symbols:\n{hpp}"
+        );
+        assert!(
+            hpp.contains("        move0, move44\n"),
+            "pointer table must reference the canonical symbol:\n{hpp}"
+        );
     }
 
     // ─── FX text descriptors consumed by fxdata-build.py ───
@@ -1849,17 +2022,6 @@ mod tests {
     }
 
     #[test]
-    fn opponent_parity_reports_first_difference_and_commands() {
-        let err = compare_opponent_bytes(
-            &[0xAA, 0xBB],
-            &[0xAA, 0xCC],
-            "python3 opponent_data.py --format fx",
-            "cgfx-tools --opponents-csv data/opponents.csv --opponents-output out",
-        )
-        .expect_err("injected divergence must fail");
-        assert!(err.0.contains("offset 1"), "{err}");
-        assert!(err.0.contains("expected 0xBB"), "{err}");
-    #[test]
     fn canonical_opponent_loader_preserves_legacy_fixture_bytes() {
         let legacy = load_opponents_csv(OPPONENTS_CSV).expect("legacy fixture parses");
         let canonical_moves = [
@@ -1955,6 +2117,17 @@ mod tests {
         std::fs::remove_file(&path).expect("remove opponent test csv");
     }
 
+    #[test]
+    fn opponent_parity_reports_first_difference_and_commands() {
+        let err = compare_opponent_bytes(
+            &[0xAA, 0xBB],
+            &[0xAA, 0xCC],
+            "python3 opponent_data.py --format fx",
+            "cgfx-tools --opponents-csv data/opponents.csv --opponents-output out",
+        )
+        .expect_err("injected divergence must fail");
+        assert!(err.0.contains("offset 1"), "{err}");
+        assert!(err.0.contains("expected 0xBB"), "{err}");
         assert!(err.0.contains("actual 0xCC"), "{err}");
         assert!(
             err.0.contains("python3 opponent_data.py --format fx"),
@@ -1970,6 +2143,9 @@ mod tests {
             width: 256,
             height: 256,
             tiles: vec![vec![0u16; 256]; 256],
+            tilesets: vec![],
+            tile_properties: Default::default(),
+            source_path: None,
             npcs: vec![],
             scripts: vec![],
             collision: vec![],
@@ -1992,14 +2168,43 @@ mod tests {
     fn build_map_raw_bin_tiles_at_positions() {
         let mut m = empty_map();
         m.tiles[0][0] = 0x0102;
-        m.tiles[1][2] = 0x1234;
-        m.tiles[7][255] = 0xABCD;
+        m.tiles[1][2] = 0x0203;
+        m.tiles[7][255] = 0x03FF;
         let a = build_map(&m).expect("build");
         // LE row-major: offset (row*256+col)*2.
         let off = |row: usize, col: usize| (row * 256 + col) * 2;
         assert_eq!(&a.raw_map[off(0, 0)..off(0, 0) + 2], &[0x02, 0x01]);
-        assert_eq!(&a.raw_map[off(1, 2)..off(1, 2) + 2], &[0x34, 0x12]);
-        assert_eq!(&a.raw_map[off(7, 255)..off(7, 255) + 2], &[0xCD, 0xAB]);
+        assert_eq!(&a.raw_map[off(1, 2)..off(1, 2) + 2], &[0x03, 0x02]);
+        assert_eq!(&a.raw_map[off(7, 255)..off(7, 255) + 2], &[0xFF, 0x03]);
+    }
+
+    #[test]
+    fn build_map_encodes_six_tile_properties_and_gid_boundaries() {
+        let mut m = empty_map();
+        m.tiles[0][0] = 0;
+        m.tiles[0][1] = 527;
+        m.tiles[0][2] = 1023;
+        m.tile_properties.insert(0, 0x3F);
+        m.tile_properties.insert(527, 0x2A);
+        m.tile_properties.insert(1023, 0x3F);
+
+        let a = build_map(&m).expect("build");
+        assert_eq!(a.raw_map.len(), 131072);
+        assert_eq!(&a.raw_map[..2], &[0, 0], "GID zero stays an empty word");
+        assert_eq!(&a.raw_map[2..4], &[0x0F, 0xAA], "527 plus mask 0x2A");
+        assert_eq!(
+            &a.raw_map[4..6],
+            &[0xFF, 0xFF],
+            "1023 plus all property bits"
+        );
+    }
+
+    #[test]
+    fn build_map_rejects_gid_over_tile_word_limit_with_coordinate() {
+        let mut m = empty_map();
+        m.tiles[2][3] = 1024;
+        let error = build_map(&m).expect_err("over-limit GID must fail");
+        assert!(error.0.contains("tile (3,2) has GID 1024"), "{error}");
     }
 
     #[test]
@@ -2250,6 +2455,45 @@ mod tests {
     }
 
     #[test]
+    fn write_map_emits_chunked_big_endian_map_bin() {
+        let mut m = empty_map();
+        m.tiles[0][0] = 7; // chunk 0, first tile
+        m.tiles[3][7] = 0x03FF; // chunk 0, last tile (tile_y 3, tile_x 7)
+        m.tiles[0][8] = 0x0102; // chunk 1, first tile
+        m.tiles[6][0] = 5; // chunk index 1*32 + 0 = 32, tile_y 2 -> offset 32*64 + 32
+        m.tile_properties.insert(7, 0x20); // encoded property must survive
+        let cfg = fixture_cfg("map_chunks");
+        write_map(&cfg, &m).expect("write");
+        let map = std::fs::read(format!("{}/map.bin", cfg.output_dir)).expect("read map.bin");
+        let raw = std::fs::read(format!("{}/raw_map.bin", cfg.output_dir)).expect("read raw");
+
+        assert_eq!(map.len(), 131072, "2048 chunks x 32 tiles x 2 bytes");
+        // Chunk 0 first word: tile 7 | (0x20 << 10) = 0x8007, big-endian.
+        assert_eq!(&map[0..2], &[0x80, 0x07]);
+        // Chunk 0 last word (within-chunk tile 31): 0x03FF.
+        assert_eq!(&map[62..64], &[0x03, 0xFF]);
+        // Chunk 1 first word (offset 1*64): 0x0102.
+        assert_eq!(&map[64..66], &[0x01, 0x02]);
+        // Chunk 32 first word (offset 32*64 + tile 16*2): 5.
+        assert_eq!(&map[32 * 64 + 32..32 * 64 + 34], &[0x00, 0x05]);
+        // Every chunk word is the big-endian form of the matching raw_map word.
+        for chunk in 0..2048usize {
+            for tile in 0..32usize {
+                let x = (chunk % 32) * 8 + tile % 8;
+                let y = (chunk / 32) * 4 + tile / 8;
+                let raw_off = (y * 256 + x) * 2;
+                let expected = u16::from_le_bytes([raw[raw_off], raw[raw_off + 1]]);
+                let packed = chunk * 64 + tile * 2;
+                assert_eq!(
+                    u16::from_be_bytes([map[packed], map[packed + 1]]),
+                    expected,
+                    "chunk {chunk} tile {tile}",
+                );
+            }
+        }
+    }
+
+    #[test]
     fn write_map_outputs_files() {
         let mut m = empty_map();
         m.scripts = vec![ScriptObject {
@@ -2289,7 +2533,7 @@ mod tests {
         let mut m = empty_map();
         m.tiles[0][0] = 5;
         m.tiles[0][1] = 0x0102;
-        m.tiles[3][10] = 0xFFFF;
+        m.tiles[3][10] = 0x03FF;
         m.npcs = vec![NPCObject {
             id: 10,
             x: 0,
@@ -2319,7 +2563,7 @@ mod tests {
         assert_eq!(&a.raw_map[2..4], &[0x02, 0x01]);
         assert_eq!(
             &a.raw_map[(3 * 256 + 10) * 2..(3 * 256 + 10) * 2 + 2],
-            &[0xFF, 0xFF]
+            &[0xFF, 0x03]
         );
         assert_eq!(a.raw_map[4], 0);
         assert_eq!(&a.raw_map[131070..], &[0, 0]);

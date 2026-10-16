@@ -1,5 +1,6 @@
 pub mod arena;
 pub mod arena_demo;
+pub mod battle_presets;
 pub mod blocks;
 pub mod builder;
 pub mod cli;
@@ -462,6 +463,12 @@ fn run_project_with_options(
     let opponents_csv = project_root.join("data/opponents.csv");
     let opponents = builder::load_opponents_csv_with_moves(&opponents_csv, &moves)
         .with_context(|| format!("Loading opponents from {}", opponents_csv.display()))?;
+    let battle_presets = cfg
+        .battle_presets
+        .as_deref()
+        .map(|path| battle_presets::load(path, &creatures, &moves, &opponents))
+        .transpose()
+        .with_context(|| "Loading battle presets")?;
     let arena_demo = cfg
         .arena_demo
         .as_deref()
@@ -547,6 +554,13 @@ fn run_project_with_options(
         };
         fixtures::emit_fixtures(&processed, fixture_dir)
             .with_context(|| format!("Writing fixtures to {fixture_dir}"))?;
+        if let Some(presets) = &battle_presets {
+            battle_presets::emit_header(
+                presets,
+                Path::new(fixture_dir).join("battle_preset_data.hpp"),
+            )
+            .with_context(|| "Writing battle preset fixture")?;
+        }
     }
 
     let creature_source = Path::new(&cfg.creatures_json);
@@ -558,10 +572,12 @@ fn run_project_with_options(
         manifest::ArtifactInput::in_output(output_dir, "creatureData.hpp", creature_source),
         manifest::ArtifactInput::in_output(output_dir, "moves.bin", move_source),
         manifest::ArtifactInput::in_output(output_dir, "moves.hpp", move_source),
+        manifest::ArtifactInput::in_output(output_dir, "moves.txt", move_source),
         manifest::ArtifactInput::in_output(output_dir, "creatureData.txt", creature_source),
         manifest::ArtifactInput::in_output(output_dir, "movedata.txt", move_source),
         manifest::ArtifactInput::in_output(output_dir, "opponents.txt", &opponents_csv),
         manifest::ArtifactInput::in_output(output_dir, "raw_map.bin", map_source),
+        manifest::ArtifactInput::in_output(output_dir, "map.bin", map_source),
         manifest::ArtifactInput::in_output(output_dir, "scripts.bin", map_source),
         manifest::ArtifactInput::in_output(output_dir, "text.bin", map_source),
         manifest::ArtifactInput::in_output(output_dir, "opcodes.hpp", map_source),

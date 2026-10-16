@@ -48,6 +48,7 @@ fn load_creatures() -> Vec<creaturevm::model::Creature> {
         npc_tileset_png: String::new(),
         output_dir: String::new(),
         fixture_dir: None,
+        battle_presets: None,
         arena_demo: None,
         duel: None,
         fx_layout: None,
@@ -68,6 +69,7 @@ fn load_moves() -> Vec<creaturevm::model::Move> {
         npc_tileset_png: String::new(),
         output_dir: String::new(),
         fixture_dir: None,
+        battle_presets: None,
         arena_demo: None,
         duel: None,
         fx_layout: None,
@@ -81,6 +83,9 @@ fn empty_map() -> GameMap {
         width: 256,
         height: 256,
         tiles: vec![vec![0u16; 256]; 256],
+        tilesets: vec![],
+        tile_properties: Default::default(),
+        source_path: None,
         npcs: vec![],
         scripts: vec![],
         collision: vec![],
@@ -116,7 +121,7 @@ fn chunk_base(idx: usize) -> usize {
 fn kitchen_sink_map() -> GameMap {
     let mut m = empty_map();
     m.tiles[0][0] = 0x0102;
-    m.tiles[3][10] = 0xABCD;
+    m.tiles[3][10] = 0x03FF;
     m.npcs = vec![NPCObject {
         id: 1,
         x: 0,
@@ -152,9 +157,9 @@ fn map_pipeline_all_commands_matches_go_bytes() {
     let mut expected_raw = vec![0u8; 256 * 256 * 2];
     expected_raw[0] = 0x02; // tiles[0][0] = 0x0102, LE
     expected_raw[1] = 0x01;
-    let off = (3 * 256 + 10) * 2; // tiles[3][10] = 0xABCD, LE
-    expected_raw[off] = 0xCD;
-    expected_raw[off + 1] = 0xAB;
+    let off = (3 * 256 + 10) * 2; // tiles[3][10] = 0x03FF, LE
+    expected_raw[off] = 0xFF;
+    expected_raw[off + 1] = 0x03;
     assert_eq!(a.raw_map, expected_raw);
 
     // ── scripts.bin ─────────────────────────────────────────────────
