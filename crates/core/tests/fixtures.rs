@@ -119,4 +119,27 @@ fn emitted_headers_are_model_derived_and_device_structural() {
     assert!(scripts.contains("{ 3, { 0x80, 0x01, 0x00 } }"));
     assert!(scripts.contains("{ 512, { 0x00, 0x00, 0x01 } }"));
     assert!(scripts.contains("{ 2047, { 0x80, 0xFF, 0x03 } }"));
+    // Pinned GiveItem opcode-9 stream fixture (contract 2026-10-12).
+    assert!(scripts.contains(
+        "const uint8_t giveItemStreamFixture[] PROGMEM = { 9, 0, 23, 99, 255 };"
+    ));
+    assert!(scripts.contains("giveItemStreamFixtureCount = 5"));
+}
+
+/// The generator's pinned GiveItem fixture stream must equal the canonical AST
+/// encoder output for the same command, so the emitted device fixture and the
+/// writer cannot drift.
+#[test]
+fn giveitem_fixture_stream_matches_encoder() {
+    use creaturevm::processor::ast::{Cmd, ToBytecode};
+    let encoded = Cmd::GiveItem {
+        kind: 0,
+        id: 23,
+        count: 99,
+    }
+    .to_bytes();
+    assert_eq!(encoded, vec![9, 0, 23, 99]);
+    let mut stream = encoded;
+    stream.push(255); // End sentinel
+    assert_eq!(stream, vec![9, 0, 23, 99, 255]);
 }

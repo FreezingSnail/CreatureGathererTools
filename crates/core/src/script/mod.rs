@@ -20,7 +20,9 @@ pub mod lexer;
 use std::collections::HashMap;
 use std::fmt;
 
-pub use crate::processor::ast::{Branch, Cmd, Condition, Location, Opcode, Text, ToBytecode};
+pub use crate::processor::ast::{
+    validate_give_item, Branch, Cmd, Condition, Location, Opcode, Text, ToBytecode,
+};
 
 pub use lexer::{Lexer, Token, TokenKind};
 
@@ -155,6 +157,7 @@ fn parse_cmd(
         "tpif" => parse_tpif(lex, locations, controller),
         "if" => parse_if(lex, locations, controller),
         "setflag" | "unsetflag" | "readflag" => parse_flag_cmd(lex, ident, controller),
+        "giveitem" => parse_giveitem(lex, line, col),
         other => Err(ScriptError {
             line,
             col,
@@ -393,6 +396,29 @@ fn parse_flag_cmd(
         "readflag" => Ok(Cmd::ReadFlag { flag }),
         _ => unreachable!(),
     }
+}
+
+/// Parse `giveitem <kind> <id> <count>`; the three operands are authored as
+/// decimal numbers and validated host-side before any byte is emitted.
+fn parse_giveitem(lex: &mut Lexer, line: usize, col: usize) -> Result<Cmd, ScriptError> {
+    let kind = parse_u16_operand(lex, "kind")?;
+    let id = parse_u16_operand(lex, "id")?;
+    let count = parse_u16_operand(lex, "count")?;
+    validate_give_item(kind, id, count)
+        .map_err(|msg| err(line, col, format!("giveitem: {msg}")))?;
+    Ok(Cmd::GiveItem {
+        kind: kind as u8,
+        id: id as u8,
+        count: count as u8,
+    })
+}
+
+fn parse_u16_operand(lex: &mut Lexer, what: &str) -> Result<u16, ScriptError> {
+    let tok = expect(lex, |k| matches!(k, TokenKind::Number(_)), what)?;
+    let TokenKind::Number(value) = tok.kind else {
+        unreachable!()
+    };
+    Ok(value)
 }
 
 #[cfg(test)]
@@ -869,5 +895,113 @@ mod tests {
             msg: "boom".to_string(),
         };
         assert_eq!(err.to_string(), "line 2, col 5: boom");
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    //  GiveItem (opcode 9, contract revision 2026-10-12)
+    // ──────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_giveitem_operands_and_bytes() {
+        let (cmds, _) = parse_ok("giveitem 0 5 3");
+        assert_eq!(cmds.len(), 1);
+        assert_eq!(
+            cmds[0],
+            Cmd::GiveItem {
+                kind: 0,
+                id: 5,
+                count: 3
+            }
+        );
+        // Pinned four-byte stream, in operand order kind,id,count.
+        assert_eq!(cmds[0].to_bytes(), vec![9, 0, 5, 3]);
+    }
+
+    #[test]
+    fn parse_giveitem_kinds_and_boundaries() {
+        for (src, kind, id, count) in [
+            ("giveitem 0 0 1", 0u8, 0u8, 1u8),
+            ("giveitem 0 23 99", 0, 23, 99),
+            ("giveitem 1 0 1", 1, 0, 1),
+            ("giveitem 1 7 99", 1, 7, 99),
+            ("giveitem 2 0 1", 2, 0, 1),
+            ("giveitem 2 7 1", 2, 7, 1),
+        ] {
+            let (cmds, _) = parse_ok(src);
+            assert_eq!(cmds[0], Cmd::GiveItem { kind, id, count }, "src: {src}");
+            assert_eq!(cmds[0].to_bytes(), vec![9, kind, id, count], "src: {src}");
+        }
+    }
+
+    #[test]
+    fn parse_giveitem_rejects_bad_authoring() {
+        // Unsupported kind.
+        let err = parse("giveitem 3 0 1", &loc_map(), &mut Controller::new())
+            .expect_err("kind 3 must fail");
+        assert!(err.msg.contains("invalid kind"), "msg: {}", err.msg);
+        // Lure id above 23.
+        let err = parse("giveitem 0 24 1", &loc_map(), &mut Controller::new())
+            .expect_err("lure id 24 must fail");
+        assert!(err.msg.contains("invalid id"), "msg: {}", err.msg);
+        // Consumable id above 7.
+        let err = parse("giveitem 1 8 1", &loc_map(), &mut Controller::new())
+            .expect_err("consumable id 8 must fail");
+        assert!(err.msg.contains("invalid id"), "msg: {}", err.msg);
+        // Count out of range.
+        let err = parse("giveitem 0 0 0", &loc_map(), &mut Controller::new())
+            .expect_err("count 0 must fail");
+        assert!(err.msg.contains("invalid count"), "msg: {}", err.msg);
+        let err = parse("giveitem 0 0 100", &loc_map(), &mut Controller::new())
+            .expect_err("count 100 must fail");
+        assert!(err.msg.contains("invalid count"), "msg: {}", err.msg);
+    }
+
+    #[test]
+    fn parse_giveitem_key_requires_count_one() {
+        let err = parse("giveitem 2 0 2", &loc_map(), &mut Controller::new())
+            .expect_err("key count 2 must fail");
+        assert!(err.msg.contains("key grants require count 1"), "msg: {}", err.msg);
+        // Keys are not counted stacks: exactly one is valid.
+        let (cmds, _) = parse_ok("giveitem 2 7 1");
+        assert_eq!(cmds[0].to_bytes(), vec![9, 2, 7, 1]);
+    }
+
+    #[test]
+    fn parse_giveitem_reports_command_position() {
+        let err = parse("msg {ok};\ngiveitem 0 24 1", &loc_map(), &mut Controller::new())
+            .expect_err("must fail");
+        assert_eq!(err.line, 2);
+        assert_eq!(err.col, 1);
+    }
+
+    #[test]
+    fn giveitem_inside_branch_keeps_skip_offset() {
+        // The then-branch length byte must count GiveItem's four bytes.
+        let (cmds, _) = parse_ok("if flag_X then giveitem 0 1 5 endif");
+        assert_eq!(
+            cmds[0].to_bytes(),
+            vec![5, 0, 0, 0, 1, 4, 9, 0, 1, 5]
+        );
+    }
+
+    #[test]
+    fn giveitem_in_then_else_branch_keeps_offsets() {
+        let (cmds, _) = parse_ok("if flag_X then giveitem 0 1 5 else giveitem 2 3 1 endif");
+        // [If][0 flag=0][0 ThenElse][4 then-len][9 0 1 5][9 2 3 1]
+        assert_eq!(
+            cmds[0].to_bytes(),
+            vec![5, 0, 0, 0, 0, 4, 9, 0, 1, 5, 9, 2, 3, 1]
+        );
+    }
+
+    #[test]
+    fn old_stream_bytes_unchanged_alongside_giveitem() {
+        // Prepending a GiveItem must not renumber or resize any existing
+        // command's encoding.
+        let (cmds, _) = parse_ok("giveitem 0 1 5; msg {hi}; setflag flag_x; tp 5 6");
+        assert_eq!(cmds[0].to_bytes(), vec![9, 0, 1, 5]);
+        assert_eq!(cmds[1].to_bytes(), vec![0, 0, 0]);
+        assert_eq!(cmds[2].to_bytes(), vec![6, 0, 0]);
+        assert_eq!(cmds[3].to_bytes(), vec![3, 0, 5, 0, 6]);
     }
 }

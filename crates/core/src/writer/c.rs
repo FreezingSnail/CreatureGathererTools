@@ -20,26 +20,45 @@ pub fn emit(project: &ProcessedProject, out_dir: &Path) -> io::Result<()> {
 }
 
 fn opcode_header(out_dir: &Path) -> io::Result<()> {
-    let mut h = File::create(out_dir.join("opcodes.hpp"))?;
+    std::fs::write(out_dir.join("opcodes.hpp"), opcode_header_text())
+}
 
-    writeln!(h, "#pragma once")?;
-    writeln!(h, "#include <stdint.h>")?;
-    writeln!(h, "// Auto-generated – DO NOT EDIT\n")?;
-
-    // ---------------------------------------------------------------
-    // 1. Enum-class for opcodes – derived from Cmd::VARIANT_NAMES
-    // ---------------------------------------------------------------
-    writeln!(h, "enum class VmOpcode : uint8_t {{")?;
+/// `enum class VmOpcode` derived from `Cmd::VARIANT_NAMES`: the array index is
+/// the numeric opcode (with `End` pinned to 255). Adding a command to the
+/// canonical list is what appends its opcode here.
+fn opcode_header_text() -> String {
+    let mut out = String::from(
+        "#pragma once\n#include <stdint.h>\n// Auto-generated – DO NOT EDIT\n\n",
+    );
+    out.push_str("enum class VmOpcode : uint8_t {\n");
     for (idx, name) in Cmd::VARIANT_NAMES.iter().enumerate() {
         if *name == "End" {
-            writeln!(h, "    {} = 255,", name)?;
+            out.push_str(&format!("    {} = 255,\n", name));
         } else {
-            writeln!(h, "    {} = {},", name, idx)?;
+            out.push_str(&format!("    {} = {},\n", name, idx));
         }
     }
-    writeln!(h, "}};\n")?;
+    out.push_str("};\n");
+    out
+}
 
-    Ok(())
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn opcode_header_appends_giveitem_nine() {
+        let text = opcode_header_text();
+        assert!(text.contains("    GiveItem = 9,\n"), "header: {text}");
+        // Existing numbers and End stay pinned.
+        assert!(text.contains("    ReadFlag = 8,\n"));
+        assert!(text.contains("    Msg = 0,\n"));
+        assert!(text.contains("    End = 255,\n"));
+        // GiveItem is the final numbered enumerator before End.
+        let give = text.find("GiveItem = 9").unwrap();
+        let end = text.find("End = 255").unwrap();
+        assert!(give < end);
+    }
 }
 fn flags(flags: &HashMap<String, u16>, out_dir: &Path) -> io::Result<()> {
     flag_bit_arr(flags, out_dir)?;

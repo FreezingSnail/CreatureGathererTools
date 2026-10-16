@@ -619,6 +619,11 @@ fn cmd_json(cmd: &Cmd) -> CmdJson {
         Cmd::SetFlag { flag } | Cmd::UnsetFlag { flag } | Cmd::ReadFlag { flag } => {
             args.push(flag.text.clone());
         }
+        Cmd::GiveItem { kind, id, count } => {
+            args.push(kind.to_string());
+            args.push(id.to_string());
+            args.push(count.to_string());
+        }
         Cmd::End => {}
     }
     CmdJson {

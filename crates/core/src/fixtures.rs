@@ -286,5 +286,14 @@ fn script_header(scripts: &[u8]) -> Result<String, BuildError> {
         ));
     }
     output.push_str("};\nconstexpr uint8_t scriptAddressFixtureCount = 3;\n");
+    // Pinned GiveItem opcode-9 stream (contract revision 2026-10-12): the
+    // four-byte command (opcode + kind + id + count) followed by End. Kept as
+    // a literal so device tests compare against the ABI rather than writer
+    // output; the native parity test pins the encoder to these bytes.
+    output.push_str(
+        "// Pinned GiveItem opcode-9 stream: GiveItem(kind=lure=0, id=23, count=99) + End.\n\
+         const uint8_t giveItemStreamFixture[] PROGMEM = { 9, 0, 23, 99, 255 };\n\
+         constexpr uint8_t giveItemStreamFixtureCount = 5;\n",
+    );
     Ok(output)
 }

@@ -248,6 +248,7 @@ fn map_pipeline_empty_matches_go_bytes() {
          \x20   SetFlag = 6,\n\
          \x20   UnsetFlag = 7,\n\
          \x20   ReadFlag = 8,\n\
+         \x20   GiveItem = 9,\n\
          \x20   End = 255,\n\
          };\n"
     );
@@ -358,6 +359,53 @@ fn script_to_bytecode_matches_go_command2bytes() {
         blob.extend_from_slice(&cmd.to_bytes());
     }
     assert_eq!(blob, FULL_SCRIPT_GO_BYTES);
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// 3c. GiveItem (opcode 9, contract revision 2026-10-12): pinned ABI bytes,
+//     unchanged old streams and branch skip offsets.
+// ─────────────────────────────────────────────────────────────────────
+
+/// Pinned GiveItem stream: opcode 9 then the three operand bytes
+/// `kind,id,count`. Held as a literal (not an encoder round-trip) so the test
+/// pins the firmware ABI rather than mirroring the writer.
+const GIVE_ITEM_GO_BYTES: &[u8] = &[9, 0, 23, 99];
+
+#[test]
+fn giveitem_matches_pinned_stream() {
+    let locations: HashMap<String, (u16, u16)> = HashMap::new();
+    let mut ctrl = Controller::new();
+    let cmds = script::parse("giveitem 0 23 99", &locations, &mut ctrl).expect("parse");
+    let mut blob = Vec::new();
+    for cmd in &cmds {
+        blob.extend_from_slice(&cmd.to_bytes());
+    }
+    assert_eq!(blob, GIVE_ITEM_GO_BYTES);
+    assert_eq!(blob.len(), 4, "GiveItem is opcode + three operand bytes");
+}
+
+#[test]
+fn giveitem_appended_keeps_old_stream_prefix() {
+    let locations: HashMap<String, (u16, u16)> = HashMap::new();
+    let mut ctrl = Controller::new();
+    let src = format!("{FULL_SCRIPT}; giveitem 1 7 99");
+    let cmds = script::parse(&src, &locations, &mut ctrl).expect("parse");
+    let mut blob = Vec::new();
+    for cmd in &cmds {
+        blob.extend_from_slice(&cmd.to_bytes());
+    }
+    assert_eq!(&blob[..FULL_SCRIPT_GO_BYTES.len()], FULL_SCRIPT_GO_BYTES);
+    assert_eq!(&blob[FULL_SCRIPT_GO_BYTES.len()..], &[9, 1, 7, 99]);
+}
+
+#[test]
+fn giveitem_branch_skip_offset_counts_four_bytes() {
+    let locations: HashMap<String, (u16, u16)> = HashMap::new();
+    let mut ctrl = Controller::new();
+    let cmds =
+        script::parse("if flag_A then giveitem 0 1 5 endif", &locations, &mut ctrl).expect("parse");
+    // [If][0 flag=0][Then][then-len=4][9 0 1 5]
+    assert_eq!(cmds[0].to_bytes(), vec![5, 0, 0, 0, 1, 4, 9, 0, 1, 5]);
 }
 
 // ─────────────────────────────────────────────────────────────────────

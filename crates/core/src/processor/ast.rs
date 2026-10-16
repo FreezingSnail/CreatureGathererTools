@@ -27,7 +27,55 @@ pub enum Opcode {
     SetFlag,
     UnsetFlag,
     ReadFlag,
+    GiveItem,
     End = 255,
+}
+
+/* ------------------------------------------------------------------------- */
+/*  GiveItem contract (revision 2026-10-12)                                  */
+/* ------------------------------------------------------------------------- */
+
+/// `giveitem <kind> <id> <count>` operand bounds. Frozen: the firmware profile
+/// (jp8.5.17) consumes exactly these values and the three operand bytes
+/// (`kind`, `id`, `count`) follow opcode 9 in that order.
+pub const GIVE_ITEM_KIND_LURE: u16 = 0;
+pub const GIVE_ITEM_KIND_CONSUMABLE: u16 = 1;
+pub const GIVE_ITEM_KIND_KEY: u16 = 2;
+
+pub const GIVE_ITEM_LURE_MAX_ID: u16 = 23;
+pub const GIVE_ITEM_CONSUMABLE_MAX_ID: u16 = 7;
+pub const GIVE_ITEM_KEY_MAX_ID: u16 = 7;
+pub const GIVE_ITEM_MAX_COUNT: u16 = 99;
+
+/// Validate authored `giveitem` operands *before* any byte is emitted.
+///
+/// Returns the first violation as a human-readable host-side diagnostic. The
+/// values arrive as `u16` from the lexer so out-of-range authoring (for
+/// example `giveitem 0 300 1`) is rejected rather than truncated.
+pub fn validate_give_item(kind: u16, id: u16, count: u16) -> Result<(), String> {
+    let (max_id, is_key) = match kind {
+        GIVE_ITEM_KIND_LURE => (GIVE_ITEM_LURE_MAX_ID, false),
+        GIVE_ITEM_KIND_CONSUMABLE => (GIVE_ITEM_CONSUMABLE_MAX_ID, false),
+        GIVE_ITEM_KIND_KEY => (GIVE_ITEM_KEY_MAX_ID, true),
+        _ => {
+            return Err(format!(
+                "invalid kind {kind}: expected 0 (lure), 1 (consumable) or 2 (key)"
+            ))
+        }
+    };
+    if id > max_id {
+        return Err(format!("invalid id {id} for kind {kind}: max {max_id}"));
+    }
+    if is_key {
+        if count != 1 {
+            return Err(format!("key grants require count 1, got {count}"));
+        }
+    } else if !(1..=GIVE_ITEM_MAX_COUNT).contains(&count) {
+        return Err(format!(
+            "invalid count {count}: expected 1..={GIVE_ITEM_MAX_COUNT}"
+        ));
+    }
+    Ok(())
 }
 
 impl From<Opcode> for u8 {
@@ -98,6 +146,12 @@ pub enum Cmd {
         flag: Text,
     },
 
+    GiveItem {
+        kind: u8,
+        id: u8,
+        count: u8,
+    },
+
     End,
 }
 
@@ -113,6 +167,7 @@ impl Cmd {
         "SetFlag",
         "UnsetFlag",
         "ReadFlag",
+        "GiveItem",
         "End",
     ];
 
@@ -129,6 +184,7 @@ impl Cmd {
             Cmd::SetFlag { .. } => Opcode::SetFlag,
             Cmd::UnsetFlag { .. } => Opcode::UnsetFlag,
             Cmd::ReadFlag { .. } => Opcode::ReadFlag,
+            Cmd::GiveItem { .. } => Opcode::GiveItem,
             Cmd::End => Opcode::End,
         }
     }
@@ -247,6 +303,12 @@ impl ToBytecode for Cmd {
             Cmd::SetFlag { flag } | Cmd::UnsetFlag { flag } | Cmd::ReadFlag { flag } => {
                 buf.extend_from_slice(&flag.to_bytes());
             }
+            Cmd::GiveItem { kind, id, count } => {
+                // Exactly three unsigned byte operands, in order.
+                buf.push(*kind);
+                buf.push(*id);
+                buf.push(*count);
+            }
             Cmd::End => { /* nothing extra */ }
         }
         buf
@@ -335,5 +397,60 @@ mod tests {
             flag: txt(5, "flag"),
         };
         assert_eq!(cmd.to_bytes(), vec![Opcode::SetFlag as u8, 0, 5]); // opcode 4
+    }
+
+    // ── GiveItem (opcode 9, contract revision 2026-10-12) ────────────────
+
+    #[test]
+    fn test_giveitem_opcode_number() {
+        // Existing numbers are frozen; GiveItem is appended at 9 and End
+        // stays at 255.
+        assert_eq!(u8::from(Opcode::ReadFlag), 8);
+        assert_eq!(u8::from(Opcode::GiveItem), 9);
+        assert_eq!(u8::from(Opcode::End), 255);
+    }
+
+    #[test]
+    fn test_cmd_giveitem_bytes() {
+        // Four-byte pinned stream: opcode + kind + id + count.
+        let cmd = Cmd::GiveItem {
+            kind: 0,
+            id: 23,
+            count: 99,
+        };
+        assert_eq!(cmd.to_bytes(), vec![9, 0, 23, 99]);
+        assert_eq!(cmd.to_bytes().len(), 4);
+    }
+
+    #[test]
+    fn test_cmd_giveitem_variant_name_index() {
+        // VARIANT_NAMES is indexed by the numeric opcode elsewhere (the Tauri
+        // editor), so GiveItem must occupy slot 9.
+        assert_eq!(Cmd::VARIANT_NAMES[9], "GiveItem");
+        assert_eq!(Cmd::VARIANT_NAMES[8], "ReadFlag");
+        assert_eq!(Cmd::VARIANT_NAMES[Cmd::VARIANT_NAMES.len() - 1], "End");
+    }
+
+    #[test]
+    fn test_validate_give_item_boundaries() {
+        // Inclusive boundaries for every kind.
+        assert!(validate_give_item(0, 0, 1).is_ok());
+        assert!(validate_give_item(0, 23, 99).is_ok());
+        assert!(validate_give_item(1, 0, 1).is_ok());
+        assert!(validate_give_item(1, 7, 99).is_ok());
+        assert!(validate_give_item(2, 0, 1).is_ok());
+        assert!(validate_give_item(2, 7, 1).is_ok());
+    }
+
+    #[test]
+    fn test_validate_give_item_rejections() {
+        assert!(validate_give_item(3, 0, 1).is_err(), "unsupported kind");
+        assert!(validate_give_item(0, 24, 1).is_err(), "lure id too high");
+        assert!(validate_give_item(1, 8, 1).is_err(), "consumable id too high");
+        assert!(validate_give_item(2, 8, 1).is_err(), "key id too high");
+        assert!(validate_give_item(0, 0, 0).is_err(), "count zero");
+        assert!(validate_give_item(0, 0, 100).is_err(), "count too high");
+        assert!(validate_give_item(2, 0, 2).is_err(), "key count must be one");
+        assert!(validate_give_item(2, 0, 0).is_err(), "key count zero");
     }
 }

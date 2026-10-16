@@ -156,6 +156,7 @@ impl<'a> Parser<'a> {
                 "tpif" => self.parse_tpif()?,
                 "if" => self.parse_if()?,
                 "setflag" | "unsetflag" | "readflag" => self.parse_flag_cmd(ident)?,
+                "giveitem" => self.parse_giveitem()?,
 
                 t => return Err(format!("parse: invalid ident token: {t}")),
             },
@@ -313,6 +314,27 @@ impl<'a> Parser<'a> {
                 }
             },
             _ => Err(format!("invalid token after if {next_token:?}")),
+        }
+    }
+
+    /// Parse `giveitem <kind> <id> <count>`; authored operands are validated
+    /// host-side (canonical AST contract) before any byte is emitted.
+    fn parse_giveitem(&mut self) -> Result<Cmd, String> {
+        let kind = self.parse_number_operand("kind")?;
+        let id = self.parse_number_operand("id")?;
+        let count = self.parse_number_operand("count")?;
+        validate_give_item(kind, id, count).map_err(|msg| format!("giveitem: {msg}"))?;
+        Ok(Cmd::GiveItem {
+            kind: kind as u8,
+            id: id as u8,
+            count: count as u8,
+        })
+    }
+
+    fn parse_number_operand(&mut self, what: &str) -> Result<u16, String> {
+        match self.lex.next().ok_or("expected number after command")?? {
+            Token::Number(n) => Ok(n),
+            other => Err(format!("expected {what} number, got {other:?}")),
         }
     }
 
@@ -539,6 +561,45 @@ mod tests {
             let mut parser = Parser::new(input, Controller::new(), HashMap::new());
             let result = parser.parse_cmd();
             assert_eq!(result, expected);
+        }
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  GiveItem (opcode 9, contract revision 2026-10-12)                 */
+    /* ------------------------------------------------------------------ */
+
+    #[test]
+    fn test_parse_giveitem() {
+        let cases: Vec<(&str, u8, u8, u8)> = vec![
+            ("giveitem 0 0 1;", 0, 0, 1),
+            ("giveitem 0 23 99;", 0, 23, 99),
+            ("giveitem 1 7 99;", 1, 7, 99),
+            ("giveitem 2 7 1;", 2, 7, 1),
+        ];
+        for (input, kind, id, count) in cases {
+            let mut parser = Parser::new(input, Controller::new(), HashMap::new());
+            let result = parser.parse_cmd().expect("parse");
+            assert_eq!(
+                result,
+                Cmd::GiveItem { kind, id, count },
+                "input: {input}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_parse_giveitem_rejects_authored_errors() {
+        for input in [
+            "giveitem 3 0 1;",
+            "giveitem 0 24 1;",
+            "giveitem 1 8 1;",
+            "giveitem 0 0 0;",
+            "giveitem 0 0 100;",
+            "giveitem 2 0 2;",
+        ] {
+            let mut parser = Parser::new(input, Controller::new(), HashMap::new());
+            let err = parser.parse_cmd().expect_err("must fail");
+            assert!(err.contains("giveitem"), "input {input} err: {err}");
         }
     }
 

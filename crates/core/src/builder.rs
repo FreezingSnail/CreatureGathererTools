@@ -837,6 +837,7 @@ fn opcodes_hpp_text() -> String {
          \x20   SetFlag = 6,\n\
          \x20   UnsetFlag = 7,\n\
          \x20   ReadFlag = 8,\n\
+         \x20   GiveItem = 9,\n\
          \x20   End = 255,\n\
          };\n",
     )
@@ -1770,6 +1771,7 @@ mod tests {
              \x20   SetFlag = 6,\n\
              \x20   UnsetFlag = 7,\n\
              \x20   ReadFlag = 8,\n\
+             \x20   GiveItem = 9,\n\
              \x20   End = 255,\n\
              };\n"
         );
@@ -1814,6 +1816,41 @@ mod tests {
         }];
         let err = build_map(&m).expect_err("must fail");
         assert!(err.0.contains("parse error in chunk 0"), "err: {}", err.0);
+    }
+
+    #[test]
+    fn build_map_giveitem_stream_bytes() {
+        // Authored GiveItem flows into the fixture/script stream as the pinned
+        // four-byte command plus the End sentinel.
+        let mut m = empty_map();
+        m.scripts = vec![ScriptObject {
+            id: 1,
+            x: 0,
+            y: 0,
+            script: "giveitem 0 23 99".to_string(),
+        }];
+        let a = build_map(&m).expect("build");
+        assert_eq!(&a.scripts_bin[..4], &[9, 0, 23, 99]);
+        assert_eq!(a.scripts_bin[4], 0xFF);
+        assert!(
+            a.scripts_hpp.contains("uint8_t blob0[] = { 9,0,23,99 };"),
+            "scripts.hpp: {}",
+            a.scripts_hpp
+        );
+    }
+
+    #[test]
+    fn build_map_giveitem_authoring_error_reports_chunk() {
+        let mut m = empty_map();
+        m.scripts = vec![ScriptObject {
+            id: 1,
+            x: 0,
+            y: 0,
+            script: "giveitem 0 24 1".to_string(),
+        }];
+        let err = build_map(&m).expect_err("must fail");
+        assert!(err.0.contains("parse error in chunk 0"), "err: {}", err.0);
+        assert!(err.0.contains("invalid id"), "err: {}", err.0);
     }
 
     #[test]
