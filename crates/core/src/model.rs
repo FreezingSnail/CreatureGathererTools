@@ -106,18 +106,6 @@ pub struct ProcessedProject {
 // ─────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct MoveEntry {
-    pub id: i32,
-    pub name: String,
-    #[serde(rename = "type")]
-    pub r#type: String,
-    pub power: i32,
-    pub physical: i32,
-    pub accuracy: i32,
-    pub effect: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Creature {
     pub name: String,
     pub id: i32,
@@ -134,33 +122,49 @@ pub struct Creature {
     pub spc_def: i32,
     pub hp: i32,
     pub spd: i32,
-    pub move1: i32,
-    pub move2: i32,
-    pub move3: i32,
-    pub move4: i32,
-    #[serde(rename = "moveList")]
-    pub move_list: Vec<MoveEntry>,
+    /// Known attack types (deduped authored names). Empty means no usable
+    /// attack (WAIT). The generator folds these to the 5-bit duel mask.
+    #[serde(default)]
+    pub moves: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Move {
-    pub id: i32,
-    pub name: String,
-    #[serde(rename = "type")]
-    pub r#type: String,
-    pub power: i32,
-    pub physical: i32,
-    pub accuracy: i32,
-    pub effect: String,
+/// Device-pinned five-type duel fold order; bit `i` of an attack mask is
+/// `DUEL_FOLD_ORDER[i]`.
+pub const DUEL_FOLD_ORDER: [&str; 5] = ["spirit", "water", "earth", "fire", "plant"];
+
+/// Fold an authored 8-type name to its duel type index, or `None` for
+/// ineligible types (`none`/`status`) and unknown names.
+pub fn fold_type_name(name: &str) -> Option<u8> {
+    let folded = match name {
+        "spirit" | "elder" => "spirit",
+        "water" | "wind" => "water",
+        "earth" => "earth",
+        "fire" | "lightning" => "fire",
+        "plant" => "plant",
+        _ => return None,
+    };
+    DUEL_FOLD_ORDER.iter().position(|t| *t == folded).map(|i| i as u8)
 }
 
-/// One packed party slot in an opponent seed. `moves` is four move IDs packed
-/// little-endian by slot: move 1 in bits 0..7 through move 4 in bits 24..31.
+/// Fold a list of authored type names to a 5-bit attack mask (duplicates and
+/// ineligible names are dropped).
+pub fn attack_mask(names: &[String]) -> u8 {
+    let mut mask = 0u8;
+    for name in names {
+        if let Some(bit) = fold_type_name(name) {
+            mask |= 1u8 << bit;
+        }
+    }
+    mask
+}
+
+/// One packed party slot in an opponent seed. `attack_mask` is the creature's
+/// 5-bit duel attack set (bit i = duel type i).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OpponentPartyMember {
     pub creature_id: u8,
     pub level: u8,
-    pub moves: u32,
+    pub attack_mask: u8,
 }
 
 /// Three-party opponent record consumed by the FX `OpponentSeed` reader.

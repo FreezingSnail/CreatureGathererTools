@@ -446,9 +446,7 @@ fn run_project_with_options(
 ) -> anyhow::Result<()> {
     let path = path.as_ref();
     let project_root = path.parent().unwrap_or_else(|| Path::new("."));
-    let reference = parity
-        .then(|| builder::capture_project_fx_descriptor_reference(project_root))
-        .transpose()?;
+    let _ = parity;
     let cfg = config::Config::load_from(path)?;
     let store = store::Store::new(&cfg);
 
@@ -457,28 +455,25 @@ fn run_project_with_options(
         .with_context(|| "Loading creatures")?;
     builder::write_creatures(&cfg, &creatures).with_context(|| "Writing creature artifacts")?;
 
-    let moves = store.load_moves().with_context(|| "Loading moves")?;
-    builder::write_moves(&cfg, &moves).with_context(|| "Writing move artifacts")?;
-
     let opponents_csv = project_root.join("data/opponents.csv");
-    let opponents = builder::load_opponents_csv_with_moves(&opponents_csv, &moves)
+    let opponents = builder::load_opponents_csv(&opponents_csv)
         .with_context(|| format!("Loading opponents from {}", opponents_csv.display()))?;
     let battle_presets = cfg
         .battle_presets
         .as_deref()
-        .map(|path| battle_presets::load(path, &creatures, &moves, &opponents))
+        .map(|path| battle_presets::load(path, &creatures, &opponents))
         .transpose()
         .with_context(|| "Loading battle presets")?;
     let arena_demo = cfg
         .arena_demo
         .as_deref()
-        .map(|path| arena_demo::load(path, &creatures, &moves, &opponents))
+        .map(|path| arena_demo::load(path, &creatures, &opponents))
         .transpose()
         .with_context(|| "Loading arena demo catalog")?;
     let duel = cfg
         .duel
         .as_deref()
-        .map(|path| duel::load(path, &creatures, &moves, &opponents))
+        .map(|path| duel::load(path, &creatures, &opponents))
         .transpose()
         .with_context(|| "Loading duel data")?;
     if let Some(catalog) = &arena_demo {
@@ -505,7 +500,7 @@ fn run_project_with_options(
         )
         .with_context(|| "Emitting duel data")?;
     }
-    builder::write_fx_descriptors(&cfg.output_dir, &creatures, &moves, &opponents)
+    builder::write_fx_descriptors(&cfg.output_dir, &creatures, &opponents)
         .with_context(|| "Writing FX text descriptors")?;
 
     // `fxdata.txt` includes creatureData from its sibling data directory.
@@ -516,21 +511,6 @@ fn run_project_with_options(
         let descriptor = builder::build_fx_creature_descriptor(&creatures)?;
         std::fs::write(&canonical_creature, descriptor)
             .with_context(|| format!("Writing {}", canonical_creature.display()))?;
-    }
-
-    if let Some(reference) = reference {
-        let output = Path::new(&cfg.output_dir);
-        let actual = builder::FxDescriptorReference {
-            opponents: std::fs::read(output.join("opponents.txt"))?,
-            creatures: std::fs::read(output.join("creatureData.txt"))?,
-            moves: std::fs::read(output.join("movedata.txt"))?,
-        };
-        builder::verify_fx_descriptor_parity(
-            &reference,
-            &actual,
-            "python3 tools/data_converters/{opponent_data,creature_data}.py",
-            &format!("cgfx-tools --project {} --parity", path.display()),
-        )?;
     }
 
     let map = store.load_map().with_context(|| "Loading map")?;
@@ -546,7 +526,6 @@ fn run_project_with_options(
         let map_artifacts = builder::build_map(&map)?;
         let processed = fixtures::FixtureProject {
             creatures: &creatures,
-            moves: &moves,
             opponents: &opponents,
             arena: &arena,
             map: &map,
@@ -564,17 +543,13 @@ fn run_project_with_options(
     }
 
     let creature_source = Path::new(&cfg.creatures_json);
-    let move_source = Path::new(&cfg.moves_json);
     let map_source = Path::new(&cfg.map_json);
     let output_dir = Path::new(&cfg.output_dir);
     let mut artifact_inputs = vec![
         manifest::ArtifactInput::in_output(output_dir, "creatureData.bin", creature_source),
         manifest::ArtifactInput::in_output(output_dir, "creatureData.hpp", creature_source),
-        manifest::ArtifactInput::in_output(output_dir, "moves.bin", move_source),
-        manifest::ArtifactInput::in_output(output_dir, "moves.hpp", move_source),
-        manifest::ArtifactInput::in_output(output_dir, "moves.txt", move_source),
         manifest::ArtifactInput::in_output(output_dir, "creatureData.txt", creature_source),
-        manifest::ArtifactInput::in_output(output_dir, "movedata.txt", move_source),
+        manifest::ArtifactInput::in_output(output_dir, "attackMask.txt", creature_source),
         manifest::ArtifactInput::in_output(output_dir, "opponents.txt", &opponents_csv),
         manifest::ArtifactInput::in_output(output_dir, "raw_map.bin", map_source),
         manifest::ArtifactInput::in_output(output_dir, "map.bin", map_source),
@@ -635,7 +610,6 @@ fn run_project_with_options(
         for &key in &keys {
             let bin_name = match key {
                 "creature_data" => "creatureData.bin",
-                "move_table" => "moves.bin",
                 "opponents" => "opponents.bin",
                 "type_table" => "typetable.bin",
                 "map_data" => "map.bin",

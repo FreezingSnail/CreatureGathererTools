@@ -7,8 +7,6 @@ use std::path::Path;
 pub struct Config {
     #[serde(rename = "creatures_json")]
     pub creatures_json: String,
-    #[serde(rename = "moves_json")]
-    pub moves_json: String,
     #[serde(rename = "map_json")]
     pub map_json: String,
     #[serde(rename = "tileset_png")]
@@ -71,7 +69,6 @@ impl Config {
 
     fn resolve_relative_paths(&mut self, config_dir: &Path) {
         resolve_relative_path(&mut self.creatures_json, config_dir);
-        resolve_relative_path(&mut self.moves_json, config_dir);
         resolve_relative_path(&mut self.map_json, config_dir);
         resolve_relative_path(&mut self.tileset_png, config_dir);
         resolve_relative_path(&mut self.map_tileset_png, config_dir);
@@ -128,7 +125,6 @@ mod tests {
             cfg.creatures_json,
             base.join("creatures.json").to_string_lossy()
         );
-        assert_eq!(cfg.moves_json, base.join("moves.json").to_string_lossy());
         assert_eq!(cfg.map_json, base.join("map.json").to_string_lossy());
         assert_eq!(cfg.tileset_png, base.join("tileset.png").to_string_lossy());
         assert_eq!(

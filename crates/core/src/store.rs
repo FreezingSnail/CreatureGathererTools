@@ -2,7 +2,7 @@
 //! ported from creatureTools internal/store/store.go.
 use crate::blocks::BlockLibrary;
 use crate::config::Config;
-use crate::model::{Creature, GameMap, Move};
+use crate::model::{Creature, GameMap};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -24,14 +24,6 @@ impl<'a> Store<'a> {
 
     pub fn save_creatures(&self, creatures: &[Creature]) -> anyhow::Result<()> {
         save_json(&self.cfg.creatures_json, creatures)
-    }
-
-    pub fn load_moves(&self) -> anyhow::Result<Vec<Move>> {
-        load_json(&self.cfg.moves_json)
-    }
-
-    pub fn save_moves(&self, moves: &[Move]) -> anyhow::Result<()> {
-        save_json(&self.cfg.moves_json, moves)
     }
 
     /// Loads either canonical GameMap JSON or a Tiled interchange map. Saving
@@ -390,7 +382,6 @@ mod tests {
 
     const TD: &str = env!("CARGO_MANIFEST_DIR");
     const CREATURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/creatures.json");
-    const MOVES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/moves.json");
     const MAP: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/map.json");
     const TILE_PROPERTY_MAP: &str = concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -400,7 +391,6 @@ mod tests {
     fn cfg() -> Config {
         Config {
             creatures_json: CREATURES.to_string(),
-            moves_json: MOVES.to_string(),
             map_json: MAP.to_string(),
             tileset_png: String::new(),
             map_tileset_png: String::new(),
@@ -432,29 +422,10 @@ mod tests {
         assert_eq!(creatures[0].spc_def, 2);
         assert_eq!(creatures[0].hp, 3);
         assert_eq!(creatures[0].spd, 3);
-        assert_eq!(creatures[0].move1, 8);
-        assert_eq!(creatures[0].move2, 32);
-        assert_eq!(creatures[0].move_list.len(), 1);
-        assert_eq!(creatures[0].move_list[0].name, "thought");
-        assert_eq!(creatures[0].move_list[0].r#type, "spirit");
+        assert_eq!(creatures[0].moves, vec!["water".to_string()]);
         assert_eq!(creatures[1].name, "NewOne");
         assert_eq!(creatures[1].id, 99);
-        assert!(creatures[1].move_list.is_empty());
-    }
-
-    #[test]
-    fn load_moves_fixture_fields() {
-        let c = cfg();
-        let s = Store::new(&c);
-        let moves = s.load_moves().expect("fixture must parse");
-        assert_eq!(moves.len(), 2);
-        assert_eq!(moves[0].id, 0);
-        assert_eq!(moves[0].name, "smite");
-        assert_eq!(moves[0].r#type, "spirit");
-        assert_eq!(moves[0].power, 10);
-        assert_eq!(moves[0].physical, 0);
-        assert_eq!(moves[0].accuracy, 100);
-        assert_eq!(moves[0].effect, "NONE");
+        assert_eq!(creatures[1].moves, vec!["spirit".to_string()]);
     }
 
     #[test]
@@ -532,7 +503,6 @@ mod tests {
         let mut c = base.clone();
         match what {
             "creatures" => c.creatures_json = format!("{TD}/testdata/roundtrip_creatures.json"),
-            "moves" => c.moves_json = format!("{TD}/testdata/roundtrip_moves.json"),
             "map" => c.map_json = format!("{TD}/testdata/roundtrip_map.json"),
             _ => unreachable!(),
         }
@@ -560,17 +530,6 @@ mod tests {
     }
 
     #[test]
-    fn roundtrip_moves() {
-        seed_roundtrip(MOVES, &roundtrip_cfg("moves").moves_json);
-        let c = roundtrip_cfg("moves");
-        let s = Store::new(&c);
-        let orig = s.load_moves().unwrap();
-        s.save_moves(&orig).unwrap();
-        let reloaded = s.load_moves().unwrap();
-        assert_eq!(orig, reloaded, "moves round-trip mismatch");
-    }
-
-    #[test]
     fn roundtrip_map() {
         seed_roundtrip(MAP, &roundtrip_cfg("map").map_json);
         let c = roundtrip_cfg("map");
@@ -585,7 +544,6 @@ mod tests {
     fn load_missing_creatures_errors() {
         let c = Config {
             creatures_json: "/nonexistent/path.json".to_string(),
-            moves_json: "/nonexistent/moves.json".to_string(),
             map_json: MAP.to_string(),
             tileset_png: String::new(),
             map_tileset_png: String::new(),
@@ -600,7 +558,6 @@ mod tests {
         };
         let s = Store::new(&c);
         assert!(s.load_creatures().is_err(), "expected error");
-        assert!(s.load_moves().is_err(), "expected error");
     }
 
     /// Go parity: `json.Unmarshal` tolerates a map JSON that omits the
@@ -616,7 +573,6 @@ mod tests {
         .expect("write partial map");
         let c = Config {
             creatures_json: CREATURES.to_string(),
-            moves_json: MOVES.to_string(),
             map_json: partial,
             tileset_png: String::new(),
             map_tileset_png: String::new(),
@@ -643,7 +599,6 @@ mod tests {
     fn load_missing_map_errors() {
         let c = Config {
             creatures_json: CREATURES.to_string(),
-            moves_json: MOVES.to_string(),
             map_json: "/nonexistent/map.json".to_string(),
             tileset_png: String::new(),
             map_tileset_png: String::new(),
@@ -752,8 +707,8 @@ mod tests {
 
     #[test]
     fn json_keys_match_go_tags() {
-        // Assert that the serialized JSON keys are exactly the Go struct tags,
-        // including the rename cases (evelevel/deff/spcatk/spcdef/moveList/...).
+        // Assert that the serialized JSON keys are exactly the authored tags,
+        // including the rename cases (evelevel/deff/spcatk/spcdef/...).
         let c = Creature {
             name: "N".to_string(),
             id: 1,
@@ -766,17 +721,13 @@ mod tests {
             spc_def: 4,
             hp: 5,
             spd: 6,
-            move1: 0,
-            move2: 0,
-            move3: 0,
-            move4: 0,
-            move_list: vec![],
+            moves: vec!["water".to_string()],
         };
         let v: serde_json::Value = serde_json::to_value(&c).unwrap();
         let o = v.as_object().unwrap();
         for key in [
             "name", "id", "type1", "type2", "evelevel", "atk", "deff", "spcatk", "spcdef", "hp",
-            "spd", "move1", "move2", "move3", "move4", "moveList",
+            "spd", "moves",
         ] {
             assert!(o.contains_key(key), "missing key {key}");
         }

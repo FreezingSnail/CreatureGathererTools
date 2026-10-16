@@ -7,17 +7,17 @@ label = "Starter"
 [[player_team.members]]
 species = "SquibbleSnail"
 level = 31
-moves = ["torrent", "none", "none", "none"]
+moves = ["water", "none", "none", "none"]
 
 [[player_team.members]]
 species = "SkitterCrab"
 level = 31
-moves = ["torrent", "none", "none", "none"]
+moves = ["water", "none", "none", "none"]
 
 [[player_team.members]]
 species = "squid"
 level = 31
-moves = ["torrent", "none", "none", "none"]
+moves = ["water", "none", "none", "none"]
 
 [[opponent_team]]
 key = "rival"

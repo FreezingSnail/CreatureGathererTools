@@ -1,11 +1,9 @@
 //! Named, test-only battle matchups resolved against canonical project data.
 use crate::builder::BuildError;
-use crate::model::{Creature, Move, OpponentSeed};
+use crate::model::{attack_mask, Creature, OpponentSeed};
 use serde::Deserialize;
 use std::collections::HashSet;
 use std::path::Path;
-
-const EMPTY_PLAYER_MOVE: u8 = 32;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -26,14 +24,14 @@ struct SourcePreset {
 struct SourceMember {
     species: String,
     level: u8,
-    moves: [String; 4],
+    moves: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Member {
     pub species: u8,
     pub level: u8,
-    pub move_ids: [u8; 4],
+    pub attack_mask: u8,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -58,23 +56,6 @@ fn creature_id(name: &str, creatures: &[Creature]) -> Result<u8, BuildError> {
         .map_err(|_| BuildError(format!("preset species {name:?} has invalid id")))
 }
 
-fn move_id(name: &str, moves: &[Move]) -> Result<u8, BuildError> {
-    if name == "none" {
-        return Ok(EMPTY_PLAYER_MOVE);
-    }
-    // Move names are case-sensitive in the canonical CSV parser: `torrent`
-    // and `Torrent` name different authored moves in moves.json.
-    let matches: Vec<_> = moves.iter().filter(|item| item.name == name).collect();
-    if matches.len() != 1 {
-        return Err(BuildError(format!(
-            "preset move {name:?} resolves to {} canonical moves",
-            matches.len()
-        )));
-    }
-    u8::try_from(matches[0].id)
-        .map_err(|_| BuildError(format!("preset move {name:?} has invalid id")))
-}
-
 fn valid_symbol(name: &str) -> bool {
     !name.is_empty()
         && name.as_bytes()[0].is_ascii_lowercase()
@@ -86,7 +67,6 @@ fn valid_symbol(name: &str) -> bool {
 pub fn parse(
     source: &str,
     creatures: &[Creature],
-    moves: &[Move],
     opponents: &[OpponentSeed],
 ) -> Result<Vec<Preset>, BuildError> {
     let parsed: Source = toml::from_str(source)
@@ -120,14 +100,10 @@ pub fn parse(
                     entry.name, member.level
                 )));
             }
-            let mut move_ids = [0; 4];
-            for (index, name) in member.moves.iter().enumerate() {
-                move_ids[index] = move_id(name, moves)?;
-            }
             player.push(Member {
                 species: creature_id(&member.species, creatures)?,
                 level: member.level,
-                move_ids,
+                attack_mask: attack_mask(&member.moves),
             });
         }
         let player: [Member; 3] = player.try_into().expect("length checked");
@@ -172,13 +148,12 @@ pub fn parse(
 pub fn load(
     path: impl AsRef<Path>,
     creatures: &[Creature],
-    moves: &[Move],
     opponents: &[OpponentSeed],
 ) -> Result<Vec<Preset>, BuildError> {
     let path = path.as_ref();
     let source = std::fs::read_to_string(path)
         .map_err(|error| BuildError(format!("reading {}: {error}", path.display())))?;
-    parse(&source, creatures, moves, opponents)
+    parse(&source, creatures, opponents)
         .map_err(|error| BuildError(format!("{}: {error}", path.display())))
 }
 
@@ -195,10 +170,9 @@ pub fn emit_header(presets: &[Preset], path: impl AsRef<Path>) -> Result<(), Bui
          #define BATTLE_PRESET_STORAGE\n\
          #endif\n\
          namespace BattlePresets {\n\
-         constexpr uint8_t emptyMoveId = 32;\n\
-         struct Member { uint8_t species, level, moveIds[4]; };\n\
+         struct Member { uint8_t species, level, attackMask; };\n\
          struct Preset { Member player[3]; uint8_t trainerId; };\n\
-         static_assert(sizeof(Preset) == 19, \"preset layout changed\");\n",
+         static_assert(sizeof(Preset) == 10, \"preset layout changed\");\n",
     );
     for preset in presets {
         header.push_str(&format!(
@@ -207,13 +181,8 @@ pub fn emit_header(presets: &[Preset], path: impl AsRef<Path>) -> Result<(), Bui
         ));
         for member in preset.player {
             header.push_str(&format!(
-                "        {{ {}, {}, {{ {}, {}, {}, {} }} }},\n",
-                member.species,
-                member.level,
-                member.move_ids[0],
-                member.move_ids[1],
-                member.move_ids[2],
-                member.move_ids[3]
+                "        {{ {}, {}, {} }},\n",
+                member.species, member.level, member.attack_mask
             ));
         }
         header.push_str(&format!("    }},\n    {}\n}};\n", preset.trainer_id));
@@ -247,15 +216,15 @@ trainer_species = ["SquibbleSnail", "SkitterCrab", "squid"]
 [[preset.player]]
 species = "SquibbleSnail"
 level = 31
-moves = ["smite", "none", "none", "none"]
+moves = ["spirit", "water"]
 [[preset.player]]
 species = "SkitterCrab"
 level = 20
-moves = ["smite", "none", "none", "none"]
+moves = ["earth"]
 [[preset.player]]
 species = "squid"
 level = 10
-moves = ["smite", "none", "none", "none"]
+moves = ["none"]
 "#;
 
     fn creature(name: &str, id: i32) -> Creature {
@@ -271,75 +240,51 @@ moves = ["smite", "none", "none", "none"]
             spc_def: 1,
             hp: 1,
             spd: 1,
-            move1: 0,
-            move2: 0,
-            move3: 0,
-            move4: 0,
-            move_list: vec![],
+            moves: vec![],
         }
     }
 
-    fn move_entry(name: &str, id: i32) -> Move {
-        Move {
-            name: name.into(),
-            id,
-            r#type: "spirit".into(),
-            power: 1,
-            physical: 0,
-            accuracy: 100,
-            effect: "NONE".into(),
-        }
-    }
-
-    fn models() -> (Vec<Creature>, Vec<Move>, Vec<OpponentSeed>) {
+    fn models() -> (Vec<Creature>, Vec<OpponentSeed>) {
         let creatures = vec![
             creature("SquibbleSnail", 0),
             creature("SkitterCrab", 3),
             creature("squid", 6),
         ];
-        let moves = vec![move_entry("smite", 0)];
         let member = |creature_id| OpponentPartyMember {
             creature_id,
             level: 31,
-            moves: 0,
+            attack_mask: 0b00001,
         };
         let opponents = vec![OpponentSeed {
             first: member(0),
             second: member(3),
             third: member(6),
         }];
-        (creatures, moves, opponents)
+        (creatures, opponents)
     }
 
     fn reject(source: &str, expected: &str) {
-        let (creatures, moves, opponents) = models();
-        let error = parse(source, &creatures, &moves, &opponents).unwrap_err();
+        let (creatures, opponents) = models();
+        let error = parse(source, &creatures, &opponents).unwrap_err();
         assert!(error.0.contains(expected), "{error}");
     }
 
     #[test]
-    fn resolves_named_team_and_empty_player_moves() {
-        let (creatures, moves, opponents) = models();
-        let presets = parse(VALID, &creatures, &moves, &opponents).unwrap();
+    fn resolves_named_team_and_empty_player_masks() {
+        let (creatures, opponents) = models();
+        let presets = parse(VALID, &creatures, &opponents).unwrap();
         assert_eq!(presets.len(), 1);
         assert_eq!(presets[0].trainer_id, 0);
         assert_eq!(presets[0].player[0].species, 0);
-        assert_eq!(presets[0].player[0].move_ids, [0, 32, 32, 32]);
+        assert_eq!(presets[0].player[0].attack_mask, 0b00011);
+        assert_eq!(presets[0].player[2].attack_mask, 0);
     }
 
     #[test]
     fn rejects_malformed_or_unresolved_preset_members() {
-        reject(&VALID.replace("smite", "unknown"), "preset move");
         reject(&VALID.replace("SkitterCrab", "Unknown"), "preset species");
         reject(&VALID.replace("level = 20", "level = 0"), "outside 1..31");
         reject(&VALID.replace("level = 20", "level = 32"), "outside 1..31");
-        reject(
-            &VALID.replace(
-                "\"smite\", \"none\", \"none\", \"none\"",
-                "\"smite\", \"none\", \"none\"",
-            ),
-            "invalid battle presets TOML",
-        );
         reject(
             &VALID.replace("name = \"opening\"", "name = \"\""),
             "invalid or duplicate",
@@ -353,9 +298,9 @@ moves = ["smite", "none", "none", "none"]
             &VALID.replace("\"squid\"]", "\"SquibbleSnail\"]"),
             "0 opponent rows",
         );
-        let (creatures, moves, mut opponents) = models();
+        let (creatures, mut opponents) = models();
         opponents.push(opponents[0]);
-        let error = parse(VALID, &creatures, &moves, &opponents).unwrap_err();
+        let error = parse(VALID, &creatures, &opponents).unwrap_err();
         assert!(error.0.contains("2 opponent rows"), "{error}");
     }
 }

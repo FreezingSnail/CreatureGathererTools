@@ -2,17 +2,15 @@
 //! (creatures.go, moves.go). Emits the same `.bin` / `.hpp` artifacts
 //! byte-for-byte as the Go builders; Go output is the reference contract.
 //!
-//! - `creatureData.bin`  : 14 bytes per creature, little-endian-ish raw
-//!   bytes (each field truncated to one byte, in model order).
+//! - `creatureData.bin`  : 11 bytes per creature, little-endian-ish raw
+//!   bytes (each field truncated to one byte, in model order); the final byte
+//!   is the creature's folded 5-bit duel attack mask.
 //! - `creatureData.hpp`  : `namespace CreatureData { uint8_t creatureData[] = {...}; }`
-//! - `moves.bin`         : 4 bytes per move: packed u16 (big-endian) +
-//!   effect byte + 0xFF effect2 byte.
-//! - `moves.hpp`         : per-move name strings + `moveNames` pointer table.
-//! - `moves.txt`         : byte-identical copy of `moves.hpp`, consumed by the
-//!   FX layout `expand` entry as the MoveData name declarations.
+//! - `attackMask.txt`    : per-creature `uint8_t attackMask[]` FX descriptor that
+//!   replaces the retired packed move list.
 
 use crate::config::Config;
-use crate::model::{Creature, GameMap, Move};
+use crate::model::{attack_mask, fold_type_name, Creature, GameMap};
 use crate::script;
 use crate::script::ToBytecode;
 use std::collections::HashMap;
@@ -53,30 +51,6 @@ fn creature_type_byte(ty: &str) -> Option<u8> {
         .iter()
         .find(|(name, _)| *name == ty)
         .map(|(_, b)| *b)
-}
-
-/// Go `moves.go` `moveTypeIndex`: type name -> u16.
-const MOVE_TYPE_INDEX: [(&str, u16); 9] = [
-    ("spirit", 0),
-    ("water", 1),
-    ("wind", 2),
-    ("earth", 3),
-    ("fire", 4),
-    ("lightning", 5),
-    ("plant", 6),
-    ("elder", 7),
-    ("status", 8),
-    // Go also maps "none" -> 15.
-];
-
-const MOVE_TYPE_NONE: u16 = 15;
-
-fn move_type_index(ty: &str) -> Option<u16> {
-    MOVE_TYPE_INDEX
-        .iter()
-        .find(|(name, _)| *name == ty)
-        .map(|(_, v)| *v)
-        .or_else(|| (ty == "none").then_some(MOVE_TYPE_NONE))
 }
 
 /// One type-effectiveness cell. Values match `type_table_data.py` exactly.
@@ -414,59 +388,6 @@ pub fn verify_type_table_python_parity(
     )
 }
 
-/// Go `moves.go` `effectIndex`: effect name -> byte (NONE -> 0xFF).
-const EFFECT_INDEX: [(&str, u8); 31] = [
-    ("NONE", 0xFF),
-    ("DPRSD", 0),
-    ("SOAKED", 1),
-    ("BUFTD", 2),
-    ("SOILED", 3),
-    ("SCRCHD", 4),
-    ("ZAPPED", 5),
-    ("TANGLD", 6),
-    ("REDCD", 7),
-    ("ENLTND", 8),
-    ("DRNCHD", 9),
-    ("AIRSWPT", 10),
-    ("GRNDED", 11),
-    ("KINDLD", 12),
-    ("CHRGD", 13),
-    ("ENRCHD", 14),
-    ("EVOLVD", 15),
-    ("ATKDWN", 16),
-    ("DEFDWN", 17),
-    ("SPCADWN", 18),
-    ("SPCDDWN", 19),
-    ("SPDDWN", 20),
-    ("ATKUP", 21),
-    ("DEFUP", 22),
-    ("SPCAUP", 23),
-    ("SPCDUP", 24),
-    ("SPDUP", 25),
-    ("SAPPD", 26),
-    ("INFSED", 27),
-    ("PINNED", 28),
-    ("CONCUSED", 29),
-];
-
-fn effect_index(effect: &str) -> Option<u8> {
-    EFFECT_INDEX
-        .iter()
-        .find(|(name, _)| *name == effect)
-        .map(|(_, v)| *v)
-}
-
-/// Go `moves.go` `accuracyIndex`: accuracy -> 2-bit index (unknown -> 0).
-fn accuracy_index(accuracy: i32) -> u16 {
-    match accuracy {
-        100 => 0,
-        90 => 1,
-        80 => 2,
-        70 => 3,
-        _ => 0,
-    }
-}
-
 /// Authoring HP bound for the one-byte per-instance HP encoding (jp8.11.22):
 /// the firmware derives max HP as `2*level + hpSeed*(level/3) + 30` truncated
 /// to a byte, and stores HP as `0 = legacy/full`, `1..=255 = actualHP + 1`.
@@ -491,10 +412,17 @@ fn validate_creature_hp(creature: &Creature) -> Result<(), BuildError> {
     Ok(())
 }
 
+/// Per-creature 5-bit duel attack masks in authoring id order. The mask is
+/// folded from the authored `moves` type list; empty lists yield 0 (WAIT).
+pub fn creature_attack_masks(creatures: &[Creature]) -> Vec<u8> {
+    creatures.iter().map(|c| attack_mask(&c.moves)).collect()
+}
+
 /// Mirrors Go `BuildCreatures`: produces the `creatureData.bin` bytes and
-/// the `creatureData.hpp` text for the given creatures.
+/// the `creatureData.hpp` text for the given creatures. Each record is 11
+/// bytes; the final byte is the folded attack mask.
 pub fn build_creatures(creatures: &[Creature]) -> Result<(Vec<u8>, String), BuildError> {
-    let mut bin = Vec::with_capacity(creatures.len() * 14);
+    let mut bin = Vec::with_capacity(creatures.len() * 11);
     let mut table = String::new();
     table.push_str("namespace CreatureData {\n\n    uint8_t creatureData[] = {\n");
     for c in creatures {
@@ -503,6 +431,7 @@ pub fn build_creatures(creatures: &[Creature]) -> Result<(Vec<u8>, String), Buil
             .ok_or_else(|| BuildError(format!("unknown type for creature {}", c.name)))?;
         let t2 = creature_type_byte(&c.type2)
             .ok_or_else(|| BuildError(format!("unknown type for creature {}", c.name)))?;
+        let mask = attack_mask(&c.moves);
         bin.extend_from_slice(&[
             c.id as u8,
             t1,
@@ -514,66 +443,15 @@ pub fn build_creatures(creatures: &[Creature]) -> Result<(Vec<u8>, String), Buil
             c.spc_def as u8,
             c.hp as u8,
             c.spd as u8,
-            c.move1 as u8,
-            c.move2 as u8,
-            c.move3 as u8,
-            c.move4 as u8,
+            mask,
         ]);
         table.push_str(&format!(
-            "    {{{}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}}},\n",
-            c.id,
-            t1,
-            t2,
-            c.evo_level,
-            c.atk,
-            c.def,
-            c.spc_atk,
-            c.spc_def,
-            c.hp,
-            c.spd,
-            c.move1,
-            c.move2,
-            c.move3,
-            c.move4
+            "    {{{}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}}},\n",
+            c.id, t1, t2, c.evo_level, c.atk, c.def, c.spc_atk, c.spc_def, c.hp, c.spd, mask
         ));
     }
     table.push_str("    };\n\n}\n");
     Ok((bin, table))
-}
-
-/// Mirrors Go `BuildMoves`: produces the `moves.bin` bytes and the
-/// `moves.hpp` text for the given moves.
-pub fn build_moves(moves: &[Move]) -> Result<(Vec<u8>, String), BuildError> {
-    let mut bin = Vec::with_capacity(moves.len() * 4);
-    let mut hpp = String::from("namespace MoveData {\n");
-    for m in moves {
-        let t = move_type_index(&m.r#type).ok_or_else(|| {
-            BuildError(format!(
-                "unknown move type {:?} for move {}",
-                m.r#type, m.name
-            ))
-        })?;
-        let acc = accuracy_index(m.accuracy);
-        let packed =
-            ((t as u16) << 12) | ((m.power as u16) << 7) | ((m.physical as u16) << 6) | (acc << 4);
-        let eff = effect_index(&m.effect).unwrap_or(0xFF);
-        bin.extend_from_slice(&packed.to_be_bytes());
-        bin.push(eff);
-        bin.push(0xFF); // effect2 always NONE
-        hpp.push_str(&format!(
-            "    uint8_t move{}[] = \"{}\\0\";\n",
-            m.id, m.name
-        ));
-    }
-    hpp.push_str("\n    uint24_t moveNames[] = {\n        ");
-    for (i, m) in moves.iter().enumerate() {
-        if i > 0 {
-            hpp.push_str(", ");
-        }
-        hpp.push_str(&format!("move{}", m.id));
-    }
-    hpp.push_str("\n    };\n\n}\n");
-    Ok((bin, hpp))
 }
 
 /// Mirrors Go `BuildCreatures` file side: writes `creatureData.bin` and
@@ -586,28 +464,6 @@ pub fn write_creatures(cfg: &Config, creatures: &[Creature]) -> Result<(), Build
     let hpp_path = dir.join("creatureData.hpp");
     std::fs::write(&bin_path, &bin).map_err(|e| io_err("writing", &bin_path, e))?;
     std::fs::write(&hpp_path, hpp).map_err(|e| io_err("writing", &hpp_path, e))?;
-    Ok(())
-}
-
-/// Mirrors Go `BuildMoves` file side: writes `moves.bin`, `moves.hpp` and the
-/// `moves.txt` FX name-declaration input into `cfg.output_dir` (creating it if
-/// needed).
-///
-/// `moves.txt` carries exactly the same bytes as `moves.hpp`: the layout's
-/// `expand` entry consumes the name declarations and the `moveNames` pointer
-/// table that the header reproduces. Emitting it here keeps a fresh tracked
-/// checkout able to generate the MoveData input instead of relying on a stale
-/// ignored artifact.
-pub fn write_moves(cfg: &Config, moves: &[Move]) -> Result<(), BuildError> {
-    let (bin, hpp) = build_moves(moves)?;
-    let dir = Path::new(&cfg.output_dir);
-    std::fs::create_dir_all(dir).map_err(|e| io_err("creating", dir, e))?;
-    let bin_path = dir.join("moves.bin");
-    let hpp_path = dir.join("moves.hpp");
-    let txt_path = dir.join("moves.txt");
-    std::fs::write(&bin_path, &bin).map_err(|e| io_err("writing", &bin_path, e))?;
-    std::fs::write(&hpp_path, &hpp).map_err(|e| io_err("writing", &hpp_path, e))?;
-    std::fs::write(&txt_path, hpp).map_err(|e| io_err("writing", &txt_path, e))?;
     Ok(())
 }
 
@@ -632,12 +488,12 @@ fn fx_type_byte(ty: &str) -> Option<u8> {
     }
 }
 
-/// Builds the `creatureData.txt` descriptor emitted by
-/// `tools/data_converters/creature_data.py`.
+/// Builds the `creatureData.txt` descriptor. Each record is 11 fields; the
+/// final field is the folded attack mask.
 pub fn build_fx_creature_descriptor(creatures: &[Creature]) -> Result<String, BuildError> {
     let mut output = String::from(
-        "// Generated from data/Creaturesheet.csv by tools/data_converters/creature_data.py.\n\
-         // Do not edit: regenerate with python3 tools/data_converters/creature_data.py.\n\
+        "// Generated by cgfx-tools from data/json/creatures.json.\n\
+         // Do not edit: regenerate with make gen.\n\
          namespace CreatureData {\n\nuint8_t creatureData[] = {\n",
     );
     for creature in creatures {
@@ -645,8 +501,9 @@ pub fn build_fx_creature_descriptor(creatures: &[Creature]) -> Result<String, Bu
             .ok_or_else(|| BuildError(format!("unknown FX type for creature {}", creature.name)))?;
         let type2 = fx_type_byte(&creature.type2)
             .ok_or_else(|| BuildError(format!("unknown FX type for creature {}", creature.name)))?;
+        let mask = attack_mask(&creature.moves);
         output.push_str(&format!(
-            "    {{{}, {type1}, {type2}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}}},\n",
+            "    {{{}, {type1}, {type2}, {}, {}, {}, {}, {}, {}, {}, {mask}}},\n",
             creature.id,
             creature.evo_level,
             creature.atk,
@@ -655,41 +512,33 @@ pub fn build_fx_creature_descriptor(creatures: &[Creature]) -> Result<String, Bu
             creature.spc_def,
             creature.hp,
             creature.spd,
-            creature.move1,
-            creature.move2,
-            creature.move3,
-            creature.move4,
         ));
     }
     output.push_str("};\n}\nnamespace_end\n");
     Ok(output)
 }
 
-/// Builds `movedata.txt`, the legacy FX move-table descriptor. `15` is the
-/// fixed secondary-type sentinel used by the original generated descriptor.
-pub fn build_fx_move_descriptor(moves: &[Move]) -> Result<String, BuildError> {
-    let mut output = String::from("namespace MoveData {\nuint8_t movePack[] = {\n");
-    let mut ordered: Vec<&Move> = moves.iter().collect();
-    ordered.sort_by_key(|movement| movement.id != 255);
-    for movement in ordered {
-        let ty = fx_type_byte(&movement.r#type).ok_or_else(|| {
-            BuildError(format!(
-                "unknown FX move type {:?} for move {}",
-                movement.r#type, movement.name
-            ))
-        })?;
-        let effect = effect_index(&movement.effect).unwrap_or(0xFF);
-        output.push_str(&format!(
-            "{{ {ty}, {}, 15, {}, {effect} }},\n",
-            movement.power, movement.accuracy
-        ));
+/// Builds `attackMask.txt`, the per-creature `uint8_t attackMask[]` FX
+/// descriptor that replaces the retired packed moveList table.
+pub fn build_fx_attack_mask_descriptor(creatures: &[Creature]) -> String {
+    let mut output = String::from("namespace AttackMasks {\nuint8_t attackMask[] = {\n");
+    let masks = creature_attack_masks(creatures);
+    for chunk in masks.chunks(16) {
+        output.push_str("    ");
+        let values = chunk
+            .iter()
+            .map(|byte| byte.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        output.push_str(&values);
+        output.push_str(",\n");
     }
     output.push_str("};\n} namespace_end\n");
-    Ok(output)
+    output
 }
 
-/// Builds `opponents.txt`, preserving the per-opponent labels and 6-byte row
-/// grouping emitted by `opponent_data.py --format fx`.
+/// Builds `opponents.txt`, preserving the per-opponent labels and 3-byte row
+/// grouping (creature ID, level, attack mask).
 pub fn build_fx_opponents_descriptor(opponents: &[OpponentSeed]) -> String {
     let mut output = String::new();
     for (index, opponent) in opponents.iter().enumerate() {
@@ -700,7 +549,7 @@ pub fn build_fx_opponents_descriptor(opponents: &[OpponentSeed]) -> String {
         };
         output.push_str(&format!("uint8_t {label}[] = {{\n"));
         let bytes = build_opponents(std::slice::from_ref(opponent));
-        for row in bytes.chunks_exact(6) {
+        for row in bytes.chunks_exact(3) {
             let values = row
                 .iter()
                 .map(|byte| format!("0x{byte:02X}"))
@@ -727,85 +576,23 @@ pub fn build_fx_opponents_descriptor(opponents: &[OpponentSeed]) -> String {
 pub fn write_fx_descriptors(
     output_dir: impl AsRef<Path>,
     creatures: &[Creature],
-    moves: &[Move],
     opponents: &[OpponentSeed],
 ) -> Result<(), BuildError> {
     let output_dir = output_dir.as_ref();
     std::fs::create_dir_all(output_dir).map_err(|e| io_err("creating", output_dir, e))?;
     let creature_path = output_dir.join("creatureData.txt");
-    let move_path = output_dir.join("movedata.txt");
+    let mask_path = output_dir.join("attackMask.txt");
     let opponent_path = output_dir.join("opponents.txt");
     write_str(&creature_path, &build_fx_creature_descriptor(creatures)?)?;
-    write_str(&move_path, &build_fx_move_descriptor(moves)?)?;
+    write_str(&mask_path, &build_fx_attack_mask_descriptor(creatures))?;
     write_str(&opponent_path, &build_fx_opponents_descriptor(opponents))
 }
 
-/// Captured Python-reference descriptor bytes for a shared project parity run.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FxDescriptorReference {
-    pub opponents: Vec<u8>,
-    pub creatures: Vec<u8>,
-    pub moves: Vec<u8>,
-}
-
-/// Runs the available Python descriptor writers before Rust output overwrites
-/// the same FX paths, then captures all three reference descriptors.
-pub fn capture_project_fx_descriptor_reference(
-    project_root: impl AsRef<Path>,
-) -> Result<FxDescriptorReference, BuildError> {
-    let root = project_root.as_ref();
-    for script in [
-        "tools/data_converters/opponent_data.py",
-        "tools/data_converters/creature_data.py",
-    ] {
-        let status = Command::new("python3")
-            .arg(script)
-            .current_dir(root)
-            .status()
-            .map_err(|e| BuildError(format!("running python3 {script}: {e}")))?;
-        if !status.success() {
-            return Err(BuildError(format!(
-                "reference converter failed ({status}): cd {} && python3 {script}",
-                root.display()
-            )));
-        }
-    }
-    let read = |relative: &str| {
-        let path = root.join(relative);
-        std::fs::read(&path).map_err(|e| io_err("reading", &path, e))
-    };
-    Ok(FxDescriptorReference {
-        opponents: read("fxdata/generated/opponents.txt")?,
-        creatures: read("fxdata/data/creatureData.txt")?,
-        moves: read("fxdata/generated/movedata.txt")?,
-    })
-}
-
-/// Checks all FX descriptors through the shared byte-parity diagnostic.
-pub fn verify_fx_descriptor_parity(
-    reference: &FxDescriptorReference,
-    actual: &FxDescriptorReference,
-    python_command: &str,
-    rust_command: &str,
-) -> Result<(), BuildError> {
-    for (artifact, expected, got) in [
-        ("opponents.txt", &reference.opponents, &actual.opponents),
-        ("creatureData.txt", &reference.creatures, &actual.creatures),
-        ("movedata.txt", &reference.moves, &actual.moves),
-    ] {
-        verify_byte_parity(artifact, expected, got, python_command, rust_command)?;
-    }
-    Ok(())
-}
-
 // ─────────────────────────────────────────────────────────────────────
-// Opponent builder. The canonical source remains `data/opponents.csv`: it is
-// deliberately not moved to JSON because `tools/data_converters/opponent_data.py`
-// reads that same CSV. Keeping one source makes Python/Rust byte parity a direct
-// migration gate.
+// Opponent builder. The canonical source remains `data/opponents.csv`.
 //
-// Each `OpponentSeed` is three `<BBI` records (creature ID, level, packed moves)
-// and therefore exactly 18 bytes, little-endian, matching Python `struct.pack`.
+// Each `OpponentSeed` is three `<BBB` records (creature ID, level, folded
+// 5-bit attack mask) and therefore exactly 9 bytes, little-endian.
 // ─────────────────────────────────────────────────────────────────────
 
 use crate::model::{OpponentPartyMember, OpponentSeed};
@@ -852,45 +639,6 @@ fn creature_id(name: &str) -> Option<u8> {
     })
 }
 
-fn move_id(name: &str) -> Option<u8> {
-    Some(match name {
-        "none" => 255,
-        "smite" => 0,
-        "thought" => 1,
-        "wisper" => 2,
-        "blast" => 3,
-        "splash" => 4,
-        "squirt" => 5,
-        "soak" => 6,
-        "current" => 7,
-        "breeze" => 8,
-        "bellow" => 9,
-        "torrent" => 10,
-        "blow" => 11,
-        "dirtburst" => 12,
-        "slipfall" => 13,
-        "dirtfall" => 14,
-        "shatter" => 15,
-        "burn" => 16,
-        "melt" => 17,
-        "torch" => 18,
-        "stoke" => 19,
-        "bolt" => 20,
-        "plasma" => 21,
-        "coil" => 22,
-        "zap" => 23,
-        "pollen" => 24,
-        "pollenburst" => 25,
-        "seedfall" => 26,
-        "root" => 27,
-        "burst" => 28,
-        "elderBurst" => 29,
-        "slam" => 30,
-        "elderSlam" => 31,
-        _ => return None,
-    })
-}
-
 fn parse_opponent_member(
     row: &[&str],
     id_col: usize,
@@ -906,38 +654,27 @@ fn parse_opponent_member(
             row[level_col]
         ))
     })?;
-    let mut moves = 0u32;
+    let mut attack_mask = 0u8;
     for offset in 0..4 {
-        let move_id = move_id(row[moves_col + offset]).ok_or_else(|| {
-            BuildError(format!(
-                "line {line}: unknown move {:?}",
-                row[moves_col + offset]
-            ))
-        })?;
-        moves |= u32::from(move_id) << (offset * 8);
+        let name = row[moves_col + offset];
+        if name == "none" || name.is_empty() {
+            continue;
+        }
+        let bit = fold_type_name(name)
+            .ok_or_else(|| BuildError(format!("line {line}: unknown attack type {name:?}")))?;
+        attack_mask |= 1u8 << bit;
     }
     Ok(OpponentPartyMember {
         creature_id,
         level,
-        moves,
+        attack_mask,
     })
 }
 
-/// Loads the canonical Python-compatible `data/opponents.csv` schema. The
-/// name column is metadata; binary output contains only the three party slots.
+/// Loads `data/opponents.csv`. Each member carries four folded attack-type
+/// names; empty slots are `none`. The name column is metadata.
 pub fn load_opponents_csv(path: impl AsRef<Path>) -> Result<Vec<OpponentSeed>, BuildError> {
-    load_opponents_csv_with(path.as_ref(), |row, _member, id, level, moves, line| {
-        parse_opponent_member(row, id, level, moves, line)
-    })
-}
-
-fn load_opponents_csv_with<F>(
-    path: &Path,
-    mut parse_member: F,
-) -> Result<Vec<OpponentSeed>, BuildError>
-where
-    F: FnMut(&[&str], &str, usize, usize, usize, usize) -> Result<OpponentPartyMember, BuildError>,
-{
+    let path = path.as_ref();
     let text = std::fs::read_to_string(path).map_err(|e| io_err("reading", path, e))?;
     let mut lines = text.lines();
     let Some(header) = lines.next() else {
@@ -965,89 +702,22 @@ where
                 )));
             }
             Ok(OpponentSeed {
-                first: parse_member(&row, "first", 0, 3, 7, line_number)?,
-                second: parse_member(&row, "second", 1, 4, 11, line_number)?,
-                third: parse_member(&row, "third", 2, 5, 15, line_number)?,
+                first: parse_opponent_member(&row, 0, 3, 7, line_number)?,
+                second: parse_opponent_member(&row, 1, 4, 11, line_number)?,
+                third: parse_opponent_member(&row, 2, 5, 15, line_number)?,
             })
         })
         .collect()
 }
 
-/// Loads project opponent rows using the canonical move table. Names are exact
-/// case matches; `none` remains 255 and move slots are packed little-endian.
-pub fn load_opponents_csv_with_moves(
-    path: impl AsRef<Path>,
-    moves: &[Move],
-) -> Result<Vec<OpponentSeed>, BuildError> {
-    let path = path.as_ref();
-    let mut ids = HashMap::new();
-    let mut ambiguous = std::collections::HashSet::new();
-    for movement in moves {
-        // `none` has a CSV sentinel encoding (255), independent of its
-        // placeholder row in moves.json.
-        if movement.name == "none" {
-            continue;
-        }
-        let id = u8::try_from(movement.id)
-            .ok()
-            .filter(|id| *id != 255)
-            .ok_or_else(|| {
-                BuildError(format!(
-                    "{}: invalid canonical move ID {} for {:?}",
-                    path.display(),
-                    movement.id,
-                    movement.name
-                ))
-            })?;
-        if ids.insert(movement.name.as_str(), id).is_some() {
-            ambiguous.insert(movement.name.as_str());
-        }
-    }
-    load_opponents_csv_with(path, |row, member, id_col, level_col, moves_col, line| {
-        let context = |message: String| {
-            BuildError(format!(
-                "{}:{line}: {member} party member: {message}",
-                path.display()
-            ))
-        };
-        let creature_id = creature_id(row[id_col])
-            .ok_or_else(|| context(format!("unknown creature {:?}", row[id_col])))?;
-        let level = row[level_col]
-            .parse::<u8>()
-            .map_err(|err| context(format!("invalid level {:?}: {err}", row[level_col])))?;
-        let mut packed = 0u32;
-        for offset in 0..4 {
-            let name = row[moves_col + offset];
-            let move_id = if name == "none" {
-                255
-            } else if ambiguous.contains(name) {
-                return Err(context(format!(
-                    "moves[{}] has ambiguous move name {name:?}",
-                    offset + 1
-                )));
-            } else {
-                *ids.get(name).ok_or_else(|| {
-                    context(format!("moves[{}] has unknown move {name:?}", offset + 1))
-                })?
-            };
-            packed |= u32::from(move_id) << (offset * 8);
-        }
-        Ok(OpponentPartyMember {
-            creature_id,
-            level,
-            moves: packed,
-        })
-    })
-}
-
-/// Produces `opponents.bin`: three little-endian `<BBI` records per opponent.
+/// Produces `opponents.bin`: three little-endian `<BBB` records per opponent.
 pub fn build_opponents(opponents: &[OpponentSeed]) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(opponents.len() * 18);
+    let mut bytes = Vec::with_capacity(opponents.len() * 9);
     for opponent in opponents {
         for member in [opponent.first, opponent.second, opponent.third] {
             bytes.push(member.creature_id);
             bytes.push(member.level);
-            bytes.extend_from_slice(&member.moves.to_le_bytes());
+            bytes.push(member.attack_mask);
         }
     }
     bytes
@@ -1472,12 +1142,10 @@ mod tests {
 
     const TD: &str = env!("CARGO_MANIFEST_DIR");
     const CREATURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/creatures.json");
-    const MOVES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/moves.json");
 
     fn fixture_cfg(output_dir: &str) -> Config {
         Config {
             creatures_json: CREATURES.to_string(),
-            moves_json: MOVES.to_string(),
             map_json: concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/map.json").to_string(),
             tileset_png: String::new(),
             map_tileset_png: String::new(),
@@ -1495,11 +1163,6 @@ mod tests {
     fn fixture_creatures() -> Vec<Creature> {
         let cfg = fixture_cfg("_");
         Store::new(&cfg).load_creatures().expect("fixture parses")
-    }
-
-    fn fixture_moves() -> Vec<Move> {
-        let cfg = fixture_cfg("_");
-        Store::new(&cfg).load_moves().expect("fixture parses")
     }
 
     const TYPE_TABLE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/typetable.csv");
@@ -1617,18 +1280,18 @@ mod tests {
     }
 
     // ─── creatures.bin: exact bytes from the Go builder (reference contract) ───
-    // SquibbleSnail: wind=2, none=8 -> {0,2,8,8,3,3,2,2,3,3,8,32,32,32}
-    // NewOne:        none=8, none=8 -> {99,8,8,1,1,1,1,1,1,1,0,0,0,0}
-    const EXPECTED_CREATURES_BIN: [u8; 28] = [
-        0, 2, 8, 8, 3, 3, 2, 2, 3, 3, 8, 32, 32, 32, //
-        99, 8, 8, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0,
+    // SquibbleSnail: wind=2, none=8, moves ["water"] -> mask 0b00010 = 2.
+    // NewOne:        none=8, none=8, moves ["spirit"] -> mask 0b00001 = 1.
+    const EXPECTED_CREATURES_BIN: [u8; 22] = [
+        0, 2, 8, 8, 3, 3, 2, 2, 3, 3, 2, //
+        99, 8, 8, 1, 1, 1, 1, 1, 1, 1, 1,
     ];
 
     const EXPECTED_CREATURES_HPP: &str = r#"namespace CreatureData {
 
     uint8_t creatureData[] = {
-    {0, 2, 8, 8, 3, 3, 2, 2, 3, 3, 8, 32, 32, 32},
-    {99, 8, 8, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0},
+    {0, 2, 8, 8, 3, 3, 2, 2, 3, 3, 2},
+    {99, 8, 8, 1, 1, 1, 1, 1, 1, 1, 1},
     };
 
 }
@@ -1638,7 +1301,7 @@ mod tests {
     fn build_creatures_bin_size() {
         let creatures = fixture_creatures();
         let (bin, _) = build_creatures(&creatures).expect("build");
-        assert_eq!(bin.len(), creatures.len() * 14);
+        assert_eq!(bin.len(), creatures.len() * 11);
     }
 
     #[test]
@@ -1652,9 +1315,8 @@ mod tests {
     fn build_creatures_first_entry() {
         let creatures = fixture_creatures();
         let (bin, _) = build_creatures(&creatures).expect("build");
-        // SquibbleSnail (Go TestBuildCreaturesFirstEntry).
-        let expected: [u8; 14] = [0, 2, 8, 8, 3, 3, 2, 2, 3, 3, 8, 32, 32, 32];
-        assert_eq!(&bin[..14], &expected);
+        let expected: [u8; 11] = [0, 2, 8, 8, 3, 3, 2, 2, 3, 3, 2];
+        assert_eq!(&bin[..11], &expected);
     }
 
     #[test]
@@ -1707,112 +1369,6 @@ mod tests {
         assert!(err.0.contains("0..=255"), "{err}");
     }
 
-    // ─── moves.bin: exact bytes from the Go builder (reference contract) ───
-    // smite:   type spirit=0, power=10, physical=0, acc=100 -> packed=1280=0x0500
-    //          -> [0x05, 0x00, 0xFF(eff NONE), 0xFF(effect2)]
-    // thought: type spirit=0, power=5,  physical=1, acc=100 -> packed=704=0x02C0
-    //          -> [0x02, 0xC0, 0xFF, 0xFF]
-    const EXPECTED_MOVES_BIN: [u8; 8] = [0x05, 0x00, 0xFF, 0xFF, 0x02, 0xC0, 0xFF, 0xFF];
-
-    const EXPECTED_MOVES_HPP: &str = r#"namespace MoveData {
-    uint8_t move0[] = "smite\0";
-    uint8_t move1[] = "thought\0";
-
-    uint24_t moveNames[] = {
-        move0, move1
-    };
-
-}
-"#;
-
-    #[test]
-    fn build_moves_bin_size() {
-        let moves = fixture_moves();
-        let (bin, _) = build_moves(&moves).expect("build");
-        assert_eq!(bin.len(), moves.len() * 4);
-    }
-
-    #[test]
-    fn build_moves_bin_matches_go_reference() {
-        let moves = fixture_moves();
-        let (bin, _) = build_moves(&moves).expect("build");
-        assert_eq!(bin, EXPECTED_MOVES_BIN.to_vec());
-    }
-
-    #[test]
-    fn build_moves_hpp_contains() {
-        let moves = fixture_moves();
-        let (_, hpp) = build_moves(&moves).expect("build");
-        assert!(hpp.contains("move0[]"));
-        assert!(hpp.contains("moveNames[]"));
-    }
-
-    #[test]
-    fn build_moves_hpp_matches_go_reference() {
-        let moves = fixture_moves();
-        let (_, hpp) = build_moves(&moves).expect("build");
-        assert_eq!(hpp, EXPECTED_MOVES_HPP);
-    }
-
-    #[test]
-    fn build_moves_unknown_type_errors() {
-        let mut moves = fixture_moves();
-        moves[0].r#type = "void".to_string();
-        let err = build_moves(&moves).expect_err("must error");
-        assert!(err.0.contains("unknown move type \"void\" for move smite"));
-    }
-
-    #[test]
-    fn build_moves_none_type_is_15() {
-        let moves = vec![Move {
-            id: 7,
-            name: "stall".to_string(),
-            r#type: "none".to_string(),
-            power: 0,
-            physical: 0,
-            accuracy: 100,
-            effect: "NONE".to_string(),
-        }];
-        let (bin, _) = build_moves(&moves).expect("build");
-        // packed = 15<<12 | 0<<7 | 0<<6 | 0<<4 = 0xF000
-        assert_eq!(bin, vec![0xF0, 0x00, 0xFF, 0xFF]);
-    }
-
-    #[test]
-    fn build_moves_known_effect_soaked() {
-        let moves = vec![Move {
-            id: 2,
-            name: "splash".to_string(),
-            r#type: "water".to_string(),
-            power: 3,
-            physical: 0,
-            accuracy: 90,
-            effect: "SOAKED".to_string(),
-        }];
-        let (bin, _) = build_moves(&moves).expect("build");
-        // t=1 -> 1<<12=0x1000; power 3<<7=0x180; acc 90->1 <<4=0x10 -> 0x1190
-        assert_eq!(bin[..2], [0x11, 0x90]);
-        assert_eq!(bin[2], 1); // SOAKED
-        assert_eq!(bin[3], 0xFF); // effect2
-    }
-
-    #[test]
-    fn build_moves_unknown_effect_defaults_ff() {
-        let mut moves = fixture_moves();
-        moves[0].effect = "MYSTERY".to_string();
-        let (bin, _) = build_moves(&moves).expect("build");
-        assert_eq!(bin[2], 0xFF);
-    }
-
-    #[test]
-    fn build_moves_unknown_accuracy_defaults_zero() {
-        let mut moves = fixture_moves();
-        moves[0].accuracy = 55; // not in Go accuracyIndex
-        let (bin, _) = build_moves(&moves).expect("build");
-        // smite power=10, physical=0: packed = 0<<12|10<<7|0<<6|0<<4 = 0x0500
-        assert_eq!(bin[..2], [0x05, 0x00]);
-    }
-
     // ─── Go-style file writing into cfg.output_dir ───
     #[test]
     fn write_creatures_outputs_files() {
@@ -1826,97 +1382,40 @@ mod tests {
         assert_eq!(hpp, EXPECTED_CREATURES_HPP);
     }
 
+    // ─── FX text descriptors ───
     #[test]
-    fn write_moves_outputs_files() {
-        let cfg = fixture_cfg("moves");
-        let moves = fixture_moves();
-        write_moves(&cfg, &moves).expect("write");
-        let bin = std::fs::read(format!("{}/moves.bin", cfg.output_dir)).expect("read bin");
-        let hpp =
-            std::fs::read_to_string(format!("{}/moves.hpp", cfg.output_dir)).expect("read hpp");
-        let txt =
-            std::fs::read_to_string(format!("{}/moves.txt", cfg.output_dir)).expect("read txt");
-        assert_eq!(bin, EXPECTED_MOVES_BIN.to_vec());
-        assert_eq!(hpp, EXPECTED_MOVES_HPP);
-        assert_eq!(txt, EXPECTED_MOVES_HPP, "moves.txt mirrors moves.hpp bytes");
-    }
-
-    #[test]
-    fn build_moves_uses_canonical_id_symbols_for_declaration_and_pointers() {
-        // Canonical `data/json/moves.json` gives Deluge id 44 even though it sits
-        // at the 33rd roster position; the emitted symbol must use that id in both
-        // the declaration and the pointer table.
-        let moves = vec![
-            Move {
-                id: 0,
-                name: "smite".to_string(),
-                r#type: "spirit".to_string(),
-                power: 10,
-                physical: 0,
-                accuracy: 100,
-                effect: "NONE".to_string(),
-            },
-            Move {
-                id: 44,
-                name: "Deluge".to_string(),
-                r#type: "none".to_string(),
-                power: 11,
-                physical: 0,
-                accuracy: 100,
-                effect: "NONE".to_string(),
-            },
-        ];
-        let (_, hpp) = build_moves(&moves).expect("build");
-        assert!(
-            hpp.contains("    uint8_t move44[] = \"Deluge\\0\";\n"),
-            "Deluge must declare the canonical move{{id}} symbol:\n{hpp}"
-        );
-        assert!(
-            !hpp.contains("move32"),
-            "canonical emission must not fall back to roster-position symbols:\n{hpp}"
-        );
-        assert!(
-            hpp.contains("        move0, move44\n"),
-            "pointer table must reference the canonical symbol:\n{hpp}"
-        );
-    }
-
-    // ─── FX text descriptors consumed by fxdata-build.py ───
-    #[test]
-    fn fx_creature_descriptor_matches_python_format() {
+    fn fx_creature_descriptor_matches_format() {
         let descriptor = build_fx_creature_descriptor(&fixture_creatures()).expect("build");
         assert_eq!(
             descriptor,
-            "// Generated from data/Creaturesheet.csv by tools/data_converters/creature_data.py.\n\
-             // Do not edit: regenerate with python3 tools/data_converters/creature_data.py.\n\
+            "// Generated by cgfx-tools from data/json/creatures.json.\n\
+             // Do not edit: regenerate with make gen.\n\
              namespace CreatureData {\n\nuint8_t creatureData[] = {\n\
-             \x20   {0, 2, 15, 8, 3, 3, 2, 2, 3, 3, 8, 32, 32, 32},\n\
-             \x20   {99, 15, 15, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0},\n\
+             \x20   {0, 2, 15, 8, 3, 3, 2, 2, 3, 3, 2},\n\
+             \x20   {99, 15, 15, 1, 1, 1, 1, 1, 1, 1, 1},\n\
              };\n}\nnamespace_end\n"
         );
     }
 
     #[test]
-    fn fx_move_descriptor_matches_python_format() {
-        let descriptor = build_fx_move_descriptor(&fixture_moves()).expect("build");
+    fn fx_attack_mask_descriptor_emits_per_creature_masks() {
+        let descriptor = build_fx_attack_mask_descriptor(&fixture_creatures());
         assert_eq!(
             descriptor,
-            "namespace MoveData {\nuint8_t movePack[] = {\n\
-             { 0, 10, 15, 100, 255 },\n\
-             { 0, 5, 15, 100, 255 },\n\
-             };\n} namespace_end\n"
+            "namespace AttackMasks {\nuint8_t attackMask[] = {\n    2, 1,\n};\n} namespace_end\n"
         );
     }
 
     #[test]
-    fn fx_opponents_descriptor_matches_python_format() {
+    fn fx_opponents_descriptor_matches_format() {
         let opponents = load_opponents_csv(OPPONENTS_CSV).expect("fixture parses");
+        // Row: squibblesnail mask 0b00001=1, none=0, dragon=0.
         assert_eq!(
             build_fx_opponents_descriptor(&opponents),
             "uint8_t opponent_seeds[] = {\n\
-             \x20   0x00, 0x1F, 0x00, 0x01, 0xFF, 0xFF,\n\
-             \x20   0xFF, 0x00, 0x17, 0xFF, 0xFF, 0xFF,\n\
-             \x20   0x1D, 0xFF, 0x1F, 0xFF, 0xFF, 0xFF,\n\
+             \x20   0x00, 0x1F, 0x01,\n\
+             \x20   0xFF, 0x00, 0x00,\n\
+             \x20   0x1D, 0xFF, 0x00,\n\
              };\n\nuint24_t opts[] = {\n    opponent_seeds,\n};\n"
         );
     }
@@ -1925,16 +1424,15 @@ mod tests {
     fn write_fx_descriptors_emits_all_pack_inputs() {
         let output = format!("{TD}/testdata/builder_out/fx_descriptors");
         let creatures = fixture_creatures();
-        let moves = fixture_moves();
         let opponents = load_opponents_csv(OPPONENTS_CSV).expect("fixture parses");
-        write_fx_descriptors(&output, &creatures, &moves, &opponents).expect("write");
+        write_fx_descriptors(&output, &creatures, &opponents).expect("write");
         assert_eq!(
             std::fs::read_to_string(format!("{output}/creatureData.txt")).expect("read creature"),
             build_fx_creature_descriptor(&creatures).expect("build")
         );
         assert_eq!(
-            std::fs::read_to_string(format!("{output}/movedata.txt")).expect("read move"),
-            build_fx_move_descriptor(&moves).expect("build")
+            std::fs::read_to_string(format!("{output}/attackMask.txt")).expect("read mask"),
+            build_fx_attack_mask_descriptor(&creatures)
         );
         assert_eq!(
             std::fs::read_to_string(format!("{output}/opponents.txt")).expect("read opponents"),
@@ -1942,25 +1440,7 @@ mod tests {
         );
     }
 
-    #[test]
-    fn fx_descriptor_parity_checks_all_three_artifacts() {
-        let reference = FxDescriptorReference {
-            opponents: b"opponents".to_vec(),
-            creatures: b"creatures".to_vec(),
-            moves: b"moves".to_vec(),
-        };
-        let mut actual = reference.clone();
-        actual.moves[0] = b'M';
-        let error =
-            verify_fx_descriptor_parity(&reference, &actual, "python3 reference", "cgfx-tools")
-                .expect_err("move descriptor mismatch must fail");
-        assert_eq!(
-            error.to_string(),
-            "movedata.txt parity mismatch at byte 0: expected 0x6D from `python3 reference`, got 0x4D from `cgfx-tools`"
-        );
-    }
-
-    // ─── opponents.bin: Python opponent_data.py layout ───
+    // ─── opponents.bin layout ───
     const OPPONENTS_CSV: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/opponents.csv");
 
     #[test]
@@ -1969,30 +1449,27 @@ mod tests {
             first: OpponentPartyMember {
                 creature_id: 0,
                 level: 31,
-                moves: 0xFFFF_0100,
+                attack_mask: 17,
             },
             second: OpponentPartyMember {
                 creature_id: 255,
                 level: 0,
-                moves: 0xFFFF_FF17,
+                attack_mask: 0,
             },
             third: OpponentPartyMember {
                 creature_id: 29,
                 level: 255,
-                moves: 0xFFFF_FF1F,
+                attack_mask: 31,
             },
         }];
         assert_eq!(
             build_opponents(&opponents),
-            vec![
-                0, 31, 0, 1, 0xFF, 0xFF, 0xFF, 0, 23, 0xFF, 0xFF, 0xFF, 29, 0xFF, 31, 0xFF, 0xFF,
-                0xFF,
-            ]
+            vec![0, 31, 17, 255, 0, 0, 29, 255, 31]
         );
     }
 
     #[test]
-    fn load_opponents_csv_uses_python_name_maps() {
+    fn load_opponents_csv_folds_type_names_to_masks() {
         let opponents = load_opponents_csv(OPPONENTS_CSV).expect("fixture parses");
         assert_eq!(opponents.len(), 1);
         assert_eq!(
@@ -2000,7 +1477,7 @@ mod tests {
             OpponentPartyMember {
                 creature_id: 0,
                 level: 31,
-                moves: 0xFFFF_0100
+                attack_mask: 0b00001
             }
         );
         assert_eq!(
@@ -2008,7 +1485,7 @@ mod tests {
             OpponentPartyMember {
                 creature_id: 255,
                 level: 0,
-                moves: 0xFFFF_FF17
+                attack_mask: 0
             }
         );
         assert_eq!(
@@ -2016,105 +1493,9 @@ mod tests {
             OpponentPartyMember {
                 creature_id: 29,
                 level: 255,
-                moves: 0xFFFF_FF1F
+                attack_mask: 0
             }
         );
-    }
-
-    #[test]
-    fn canonical_opponent_loader_preserves_legacy_fixture_bytes() {
-        let legacy = load_opponents_csv(OPPONENTS_CSV).expect("legacy fixture parses");
-        let canonical_moves = [
-            canonical_move(0, "smite"),
-            canonical_move(1, "thought"),
-            canonical_move(23, "zap"),
-            canonical_move(31, "elderSlam"),
-        ];
-        let canonical = load_opponents_csv_with_moves(OPPONENTS_CSV, &canonical_moves)
-            .expect("canonical fixture parses");
-        assert_eq!(build_opponents(&canonical), build_opponents(&legacy));
-    }
-
-    fn canonical_move(id: i32, name: &str) -> Move {
-        Move {
-            id,
-            name: name.to_owned(),
-            r#type: "water".to_owned(),
-            power: 0,
-            physical: 0,
-            accuracy: 100,
-            effect: String::new(),
-        }
-    }
-
-    fn write_test_opponents(contents: &str) -> std::path::PathBuf {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        static NEXT: AtomicUsize = AtomicUsize::new(0);
-        let path = std::env::temp_dir().join(format!(
-            "cgfx-opponents-{}-{}.csv",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        ));
-        std::fs::write(&path, contents).expect("write opponent test csv");
-        path
-    }
-
-    #[test]
-    fn canonical_opponent_loader_resolves_new_names_and_packs_little_endian() {
-        let csv = format!(
-            "{}\nsquibblesnail,none,none,31,0,0,fixture,deepthought,Ironbody,Sharpen,rejuvinate,none,none,none,none,none,none,none,none\n",
-            "c1,c2,c3,l1,l2,l3,name,c1m1,c1m2,c1m3,c1m4,c2m1,c2m2,c2m3,c2m4,c3m1,c3m2,c3m3,c3m4"
-        );
-        let path = write_test_opponents(&csv);
-        let moves = [
-            canonical_move(42, "deepthought"),
-            canonical_move(41, "Ironbody"),
-            canonical_move(37, "Sharpen"),
-            canonical_move(43, "rejuvinate"),
-            canonical_move(43, "none"),
-        ];
-        let opponents =
-            load_opponents_csv_with_moves(&path, &moves).expect("canonical names parse");
-        std::fs::remove_file(&path).expect("remove opponent test csv");
-
-        assert_eq!(opponents.len(), 1);
-        assert_eq!(opponents[0].first.moves, 0x2B_25_29_2A);
-        assert_eq!(opponents[0].second.moves, 0xFFFF_FFFF);
-        assert_eq!(opponents[0].third.moves, 0xFFFF_FFFF);
-    }
-
-    #[test]
-    fn canonical_opponent_loader_reports_path_line_member_and_move_slot() {
-        let csv = "c1,c2,c3,l1,l2,l3,name,c1m1,c1m2,c1m3,c1m4,c2m1,c2m2,c2m3,c2m4,c3m1,c3m2,c3m3,c3m4\nsquibblesnail,none,none,31,0,0,fixture,known,Missing,none,none,none,none,none,none,none,none,none,none\n";
-        let path = write_test_opponents(csv);
-        let err = load_opponents_csv_with_moves(&path, &[canonical_move(3, "known")])
-            .expect_err("unknown move rejected");
-        std::fs::remove_file(&path).expect("remove opponent test csv");
-        assert!(err.0.contains(&path.display().to_string()), "{err}");
-        assert!(err.0.contains(":2: first party member:"), "{err}");
-        assert!(
-            err.0.contains("moves[2] has unknown move \"Missing\""),
-            "{err}"
-        );
-    }
-
-    #[test]
-    fn canonical_opponent_loader_rejects_ambiguous_names_and_reserved_ids() {
-        let csv = "c1,c2,c3,l1,l2,l3,name,c1m1,c1m2,c1m3,c1m4,c2m1,c2m2,c2m3,c2m4,c3m1,c3m2,c3m3,c3m4\nsquibblesnail,none,none,31,0,0,fixture,same,none,none,none,none,none,none,none,none,none,none,none\n";
-        let path = write_test_opponents(csv);
-        let ambiguous = [canonical_move(1, "same"), canonical_move(2, "same")];
-        let err =
-            load_opponents_csv_with_moves(&path, &ambiguous).expect_err("ambiguous name rejected");
-        assert!(err.0.contains("ambiguous move name \"same\""), "{err}");
-        let out_of_range = [canonical_move(255, "same")];
-        let err =
-            load_opponents_csv_with_moves(&path, &out_of_range).expect_err("reserved ID rejected");
-        assert!(err.0.contains("invalid canonical move ID 255"), "{err}");
-        let too_large = [canonical_move(300, "same")];
-        let err =
-            load_opponents_csv_with_moves(&path, &too_large).expect_err("ID beyond u8 rejected");
-        assert!(err.0.contains("invalid canonical move ID 300"), "{err}");
-        std::fs::remove_file(&path).expect("remove opponent test csv");
     }
 
     #[test]

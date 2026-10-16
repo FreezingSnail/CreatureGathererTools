@@ -8,15 +8,13 @@
 //! species-default option lists. No legacy record/layout/save changes.
 
 use crate::builder::BuildError;
-use crate::model::{Creature, Move, OpponentPartyMember, OpponentSeed};
+use crate::model::{Creature, OpponentPartyMember, OpponentSeed};
 use serde::Deserialize;
 use std::collections::{BTreeMap, HashSet};
 use std::fmt::Write as _;
 use std::path::Path;
 
 const NO_TYPE: u8 = 255;
-const EMPTY_MOVE: u8 = 255;
-const RESERVED_MOVE_ID: i32 = 255;
 const MAX_LIST_ITEMS: usize = 255;
 const MAX_LEVEL: u8 = 31;
 const MAX_RATE: u8 = 75;
@@ -167,7 +165,6 @@ pub struct Team {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Catalog {
     pub order: Vec<String>,
-    pub move_types: Vec<u8>,
     pub species: Vec<SpeciesTypes>,
     pub trainers: Vec<TrainerEntry>,
     pub overrides: Vec<SlotOverride>,
@@ -305,8 +302,6 @@ fn persona_rate(personas: &Personas, id: u8) -> u8 {
 
 fn validate_opponent_member(
     member: OpponentPartyMember,
-    moves: &[Move],
-    move_types: &[u8],
     context: &str,
 ) -> Result<(), BuildError> {
     // A level-zero member is the empty-party sentinel and is always valid, so
@@ -320,26 +315,7 @@ fn validate_opponent_member(
             member.level
         )));
     }
-    let mut has_attack = false;
-    // OpponentSeed packs the four move ids little-endian; 255 is the empty slot.
-    for id in member.moves.to_le_bytes() {
-        if id == EMPTY_MOVE {
-            continue;
-        }
-        let matches = moves.iter().filter(|item| item.id == i32::from(id)).count();
-        if matches != 1 {
-            return Err(BuildError(format!(
-                "{context}: packed opponent move ID {id} resolves to {matches} canonical moves"
-            )));
-        }
-        if move_types
-            .get(usize::from(id))
-            .is_some_and(|type_| *type_ != NO_TYPE)
-        {
-            has_attack = true;
-        }
-    }
-    if !has_attack {
+    if member.attack_mask & 0x1F == 0 {
         return Err(BuildError(format!(
             "{context}: opponent has no eligible authored attack"
         )));
@@ -350,7 +326,6 @@ fn validate_opponent_member(
 pub fn parse(
     source: &str,
     creatures: &[Creature],
-    moves: &[Move],
     opponents: &[OpponentSeed],
 ) -> Result<Catalog, BuildError> {
     let parsed: Source = toml::from_str(source)
@@ -418,42 +393,6 @@ pub fn parse(
         )));
     }
 
-    // Per-move folded attack type, indexed by authored move id. Gaps and
-    // utility/status/none slots stay NO_TYPE.
-    let mut max_move_id = 0i32;
-    for movement in moves {
-        if movement.id == RESERVED_MOVE_ID {
-            continue;
-        }
-        if movement.id < 0 {
-            return Err(BuildError(format!("duel move id {} is negative", movement.id)));
-        }
-        if movement.id > max_move_id {
-            max_move_id = movement.id;
-        }
-    }
-    let move_count = usize::try_from(max_move_id + 1)
-        .map_err(|_| BuildError("duel move id range too large".into()))?;
-    if move_count > MAX_LIST_ITEMS {
-        return Err(BuildError(format!(
-            "duel move id range {move_count} exceeds {MAX_LIST_ITEMS}"
-        )));
-    }
-    let mut move_types = vec![NO_TYPE; move_count];
-    for movement in moves {
-        if movement.id == RESERVED_MOVE_ID {
-            continue;
-        }
-        let index = usize::try_from(movement.id)
-            .map_err(|_| BuildError(format!("duel move id {} invalid", movement.id)))?;
-        move_types[index] = fold_name(
-            &order,
-            &map,
-            &movement.r#type,
-            &format!("duel move {:?}", movement.name),
-        )?;
-    }
-
     // Every occupied authored opponent slot must hold at least one folded
     // eligible attack, whether or not the row carries an explicit persona or
     // retype. Empty (level-zero) slots are the sentinel and are skipped.
@@ -461,8 +400,6 @@ pub fn parse(
         for (slot, member) in [row.first, row.second, row.third].into_iter().enumerate() {
             validate_opponent_member(
                 member,
-                moves,
-                &move_types,
                 &format!("duel opponent row {row_index} member {}", slot + 1),
             )?;
         }
@@ -641,7 +578,6 @@ pub fn parse(
 
     Ok(Catalog {
         order,
-        move_types,
         species,
         trainers,
         overrides,
@@ -654,13 +590,12 @@ pub fn parse(
 pub fn load(
     path: impl AsRef<Path>,
     creatures: &[Creature],
-    moves: &[Move],
     opponents: &[OpponentSeed],
 ) -> Result<Catalog, BuildError> {
     let path = path.as_ref();
     let source = std::fs::read_to_string(path)
         .map_err(|error| BuildError(format!("reading {}: {error}", path.display())))?;
-    parse(&source, creatures, moves, opponents)
+    parse(&source, creatures, opponents)
         .map_err(|error| BuildError(format!("{}: {error}", path.display())))
 }
 
@@ -709,7 +644,6 @@ pub fn emit(
         .map_err(|error| anyhow::anyhow!("creating {}: {error}", output_dir.display()))?;
 
     let mut descriptor = String::from("namespace DuelData {\n\n");
-    descriptor.push_str(&byte_block("duelMoveTypes", catalog.move_types.iter().copied()));
     descriptor.push_str(&byte_block(
         "duelSpeciesTypes",
         catalog
@@ -789,11 +723,6 @@ fn ids_header(catalog: &Catalog) -> String {
     let _ = writeln!(output, "constexpr uint8_t noType = {};", NO_TYPE);
     let _ = writeln!(
         output,
-        "constexpr uint8_t moveCount = {};",
-        catalog.move_types.len()
-    );
-    let _ = writeln!(
-        output,
         "constexpr uint8_t speciesCount = {};",
         catalog.species.len()
     );
@@ -841,11 +770,6 @@ fn fixture_header(catalog: &Catalog) -> String {
     let _ = writeln!(output, "constexpr uint8_t noType = {};", NO_TYPE);
     let _ = writeln!(
         output,
-        "constexpr uint8_t moveCount = {};",
-        catalog.move_types.len()
-    );
-    let _ = writeln!(
-        output,
         "constexpr uint8_t speciesCount = {};",
         catalog.species.len()
     );
@@ -874,11 +798,6 @@ fn fixture_header(catalog: &Catalog) -> String {
             .collect::<Vec<_>>()
             .join(", ")
     };
-    let _ = writeln!(
-        output,
-        "const uint8_t duelMoveTypes[] = {{ {} }};",
-        values(catalog.move_types.clone())
-    );
     let _ = writeln!(
         output,
         "const uint8_t duelSpeciesTypes[] = {{ {} }};",
@@ -1018,72 +937,41 @@ types = ["water"]
             spc_def: 1,
             hp: 1,
             spd: 1,
-            move1: 0,
-            move2: 0,
-            move3: 0,
-            move4: 0,
-            move_list: vec![],
+            moves: vec![],
         }
     }
 
-    fn movement(name: &str, id: i32, r#type: &str) -> Move {
-        Move {
-            id,
-            name: name.into(),
-            r#type: r#type.into(),
-            power: 1,
-            physical: 0,
-            accuracy: 100,
-            effect: "NONE".into(),
-        }
-    }
-
-    fn models() -> (Vec<Creature>, Vec<Move>, Vec<OpponentSeed>) {
+    fn models() -> (Vec<Creature>, Vec<OpponentSeed>) {
         let creatures = vec![
             creature("SquibbleSnail", 0, "wind", "none"),
             creature("SkitterCrab", 3, "earth", "none"),
             creature("squid", 6, "water", "none"),
             creature("OrbitRelic", 7, "elder", "spirit"),
         ];
-        let moves = vec![
-            movement("smite", 0, "spirit"),
-            movement("splash", 4, "water"),
-            movement("breeze", 8, "wind"),
-            movement("bolt", 20, "lightning"),
-            movement("Sharpen", 37, "status"),
-            movement("none", 255, "none"),
-        ];
         let member = |id| OpponentPartyMember {
             creature_id: id,
             level: 31,
-            moves: u32::from_le_bytes([0, 255, 255, 255]),
+            attack_mask: 0b00001, // spirit
         };
         let opponents = vec![OpponentSeed {
             first: member(0),
             second: member(3),
             third: member(6),
         }];
-        (creatures, moves, opponents)
+        (creatures, opponents)
     }
 
     fn reject(source: &str, expected: &str) {
-        let (creatures, moves, opponents) = models();
-        let error = parse(source, &creatures, &moves, &opponents).unwrap_err();
+        let (creatures, opponents) = models();
+        let error = parse(source, &creatures, &opponents).unwrap_err();
         assert!(error.0.contains(expected), "{error}");
     }
 
     #[test]
-    fn resolves_fold_moves_species_personas_retypes_and_teams() {
-        let (creatures, moves, opponents) = models();
-        let catalog = parse(VALID, &creatures, &moves, &opponents).unwrap();
+    fn resolves_species_personas_retypes_and_teams() {
+        let (creatures, opponents) = models();
+        let catalog = parse(VALID, &creatures, &opponents).unwrap();
         assert_eq!(catalog.order.len(), 5);
-        // Move id order: spirit->0, water->1, wind->1 (water), status->255.
-        assert_eq!(catalog.move_types.len(), 38);
-        assert_eq!(catalog.move_types[0], 0);
-        assert_eq!(catalog.move_types[4], 1);
-        assert_eq!(catalog.move_types[8], 1);
-        assert_eq!(catalog.move_types[20], 3);
-        assert_eq!(catalog.move_types[37], NO_TYPE);
         // Species default folded types (wind->water, elder+spirit dedup to 1).
         assert_eq!(catalog.species[0].count, 1);
         assert_eq!(catalog.species[0].types[0], 1);
@@ -1107,14 +995,14 @@ types = ["water"]
 
     #[test]
     fn demo_persona_rate_default_reader_45_and_accept_explicit() {
-        let (creatures, moves, opponents) = models();
+        let (creatures, opponents) = models();
         // VALID omits [demo], so the canonical mock window default applies.
-        let catalog = parse(VALID, &creatures, &moves, &opponents).unwrap();
+        let catalog = parse(VALID, &creatures, &opponents).unwrap();
         assert_eq!(catalog.demo_persona, 1, "reader");
         assert_eq!(catalog.demo_rate, 45);
 
         let source = format!("{VALID}\n[demo]\npersona = \"frequency\"\nrate = 50\n");
-        let catalog = parse(&source, &creatures, &moves, &opponents).unwrap();
+        let catalog = parse(&source, &creatures, &opponents).unwrap();
         assert_eq!(catalog.demo_persona, 2, "frequency");
         assert_eq!(catalog.demo_rate, 50);
 
@@ -1130,8 +1018,8 @@ types = ["water"]
 
     #[test]
     fn dedupes_secondary_folded_type_and_allows_missing_retype() {
-        let (creatures, moves, opponents) = models();
-        let catalog = parse(VALID, &creatures, &moves, &opponents).unwrap();
+        let (creatures, opponents) = models();
+        let catalog = parse(VALID, &creatures, &opponents).unwrap();
         // wind+water collapse, so SquibbleSnail keeps one type; the team member
         // has an explicit retype and the species default is never an option list.
         assert_eq!(catalog.species[0].types, [1, NO_TYPE]);
@@ -1140,12 +1028,12 @@ types = ["water"]
 
     #[test]
     fn defaults_unlisted_trainers_to_random_zero() {
-        let (creatures, moves, opponents) = models();
+        let (creatures, opponents) = models();
         let source = VALID.replace(
             "[[trainer]]\ntrainer_species = [\"SquibbleSnail\", \"SkitterCrab\", \"squid\"]\npersona = \"reader\"\n[[trainer.member]]\nslot = 0\ntypes = [\"earth\"]\n",
             "",
         );
-        let catalog = parse(&source, &creatures, &moves, &opponents).unwrap();
+        let catalog = parse(&source, &creatures, &opponents).unwrap();
         assert_eq!(catalog.trainers[0].persona, 0);
         assert_eq!(catalog.trainers[0].rate, 0);
         assert!(catalog.overrides.is_empty());
@@ -1223,71 +1111,59 @@ types = ["water"]
             ),
             "listed more than once",
         );
-        let (creatures, moves, mut opponents) = models();
-        opponents[0].first.moves = u32::MAX;
-        let error = parse(VALID, &creatures, &moves, &opponents).unwrap_err();
+        let (creatures, mut opponents) = models();
+        opponents[0].first.attack_mask = 0;
+        let error = parse(VALID, &creatures, &opponents).unwrap_err();
         assert!(error.0.contains("no eligible authored attack"), "{error}");
-        let (creatures, moves, mut opponents) = models();
+        let (creatures, mut opponents) = models();
         opponents[0].first.level = 32;
-        let error = parse(VALID, &creatures, &moves, &opponents).unwrap_err();
+        let error = parse(VALID, &creatures, &opponents).unwrap_err();
         assert!(error.0.contains("outside 1..=31"), "{error}");
     }
 
     #[test]
-    fn rejects_utility_only_opponent_kit() {
-        let (creatures, moves, mut opponents) = models();
-        // Sharpen (id 37) folds to NO_TYPE, so a status-only kit must fail even
-        // though every packed id resolves to a canonical move.
-        opponents[0].first.moves = u32::from_le_bytes([37, 255, 255, 255]);
-        let error = parse(VALID, &creatures, &moves, &opponents).unwrap_err();
-        assert!(error.0.contains("no eligible authored attack"), "{error}");
-    }
-
-    #[test]
     fn accepts_partial_opponent_party_with_empty_sentinel_slots() {
-        let (creatures, moves, mut opponents) = models();
+        let (creatures, mut opponents) = models();
         opponents[0].second.level = 0;
         opponents[0].third.level = 0;
-        let catalog = parse(VALID, &creatures, &moves, &opponents).unwrap();
+        let catalog = parse(VALID, &creatures, &opponents).unwrap();
         assert_eq!(catalog.trainers[0].persona, 1);
     }
 
     #[test]
     fn rejects_retype_of_empty_opponent_slot() {
-        let (creatures, moves, mut opponents) = models();
+        let (creatures, mut opponents) = models();
         opponents[0].second.level = 0;
         let source = VALID.replace(
             "persona = \"reader\"\n",
             "persona = \"reader\"\n[[trainer.member]]\nslot = 1\ntypes = [\"earth\"]\n",
         );
-        let error = parse(&source, &creatures, &moves, &opponents).unwrap_err();
+        let error = parse(&source, &creatures, &opponents).unwrap_err();
         assert!(error.0.contains("retype slot 1 is empty"), "{error}");
     }
 
     #[test]
-    fn accepts_species_zero_custom_move_ids_and_default_kits() {
-        let (creatures, moves, opponents) = models();
+    fn accepts_species_zero_and_default_kits() {
+        let (creatures, opponents) = models();
         assert_eq!(creatures[0].id, 0, "species zero stays a valid id");
         let source = VALID.replace(
             "species = \"squid\"\nlevel = 31\ntypes = [\"water\"]",
             "species = \"SquibbleSnail\"\nlevel = 3",
         );
-        let catalog = parse(&source, &creatures, &moves, &opponents).unwrap();
+        let catalog = parse(&source, &creatures, &opponents).unwrap();
         let member = catalog.teams[0].members[0];
         assert_eq!(member.species, 0);
         assert_eq!(member.level, 3);
         assert_eq!(member.count, 0, "no retype falls back to species types");
-        // Folded per authored move id, independent of any species default kit.
-        assert_eq!(catalog.move_types[20], 3);
     }
 
     #[test]
     fn load_prefixes_path_and_emits_compact_records() {
-        let (creatures, moves, opponents) = models();
-        let error = load("missing-duel.toml", &creatures, &moves, &opponents).unwrap_err();
+        let (creatures, opponents) = models();
+        let error = load("missing-duel.toml", &creatures, &opponents).unwrap_err();
         assert!(error.0.contains("missing-duel.toml"), "{error}");
 
-        let catalog = parse(VALID, &creatures, &moves, &opponents).unwrap();
+        let catalog = parse(VALID, &creatures, &opponents).unwrap();
         let ids = ids_header(&catalog);
         assert!(ids.contains("constexpr uint8_t typeCount = 5;"));
         assert!(ids.contains("constexpr uint8_t team_balanced = 0;"));
@@ -1296,7 +1172,7 @@ types = ["water"]
         assert!(ids.contains("constexpr uint8_t demoPersona = 1;"));
         assert!(ids.contains("constexpr uint8_t demoRate = 45;"));
         let fixture = fixture_header(&catalog);
-        assert!(fixture.contains("const uint8_t duelMoveTypes[]"));
+        assert!(fixture.contains("const uint8_t duelSpeciesTypes[]"));
         assert!(fixture.contains("const uint8_t duelTeamMembers[]"));
         assert!(fixture.contains("const uint8_t duelDemoPersona[] = { 1 };"));
         assert!(fixture.contains("const uint8_t duelDemoRate[] = { 45 };"));
