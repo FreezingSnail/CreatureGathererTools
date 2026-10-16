@@ -2,16 +2,6 @@
 // Kept separate from the shared types.ts (owned by the map-editor task) to
 // avoid clashing with that in-flight work.
 
-export interface MoveEntry {
-  id: number;
-  name: string;
-  type: string;
-  power: number;
-  physical: number;
-  accuracy: number;
-  effect: string;
-}
-
 export interface Creature {
   name: string;
   id: number;
@@ -24,11 +14,8 @@ export interface Creature {
   spcdef: number;
   hp: number;
   spd: number;
-  move1: number;
-  move2: number;
-  move3: number;
-  move4: number;
-  moveList: MoveEntry[];
+  /** Known attack types, authored 8-type names (e.g. ["spirit","water"]). */
+  moves: string[];
 }
 
 export interface Move {
@@ -54,6 +41,12 @@ export const CREATURE_TYPES = [
 ] as const;
 
 export const MOVE_TYPES = [...CREATURE_TYPES, "status"] as const;
+
+/**
+ * Duel types exposed as creature attack-type checkboxes, in the pinned fold
+ * order (bit i of the 5-bit attack mask). See docs/moveset-type-mask-brief.md.
+ */
+export const DUEL_TYPES = ["spirit", "water", "earth", "fire", "plant"] as const;
 
 export const MOVE_EFFECTS = [
   "NONE",

@@ -2,12 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { CreatureEditor, type CreatureApi } from "./CreatureEditor";
-import type { Creature, Move } from "../editorTypes";
-
-const moves: Move[] = [
-  { id: 1, name: "Tackle", type: "spirit", power: 40, physical: 1, accuracy: 100, effect: "NONE" },
-  { id: 2, name: "Ember", type: "fire", power: 60, physical: 0, accuracy: 90, effect: "KINDLD" },
-];
+import type { Creature } from "../editorTypes";
 
 const creatures: Creature[] = [
   {
@@ -22,11 +17,7 @@ const creatures: Creature[] = [
     spcdef: 5,
     hp: 30,
     spd: 12,
-    move1: 1,
-    move2: 0,
-    move3: 0,
-    move4: 0,
-    moveList: [],
+    moves: ["spirit"],
   },
   {
     name: "Burnling",
@@ -40,18 +31,13 @@ const creatures: Creature[] = [
     spcdef: 6,
     hp: 25,
     spd: 9,
-    move1: 2,
-    move2: 1,
-    move3: 0,
-    move4: 0,
-    moveList: [],
+    moves: ["fire", "spirit"],
   },
 ];
 
 function makeApi(): CreatureApi & { saveCreatures: ReturnType<typeof vi.fn> } {
   return {
     loadCreatures: vi.fn(async () => creatures),
-    loadMoves: vi.fn(async () => moves),
     saveCreatures: vi.fn(async () => undefined),
   };
 }
@@ -121,17 +107,27 @@ describe("CreatureEditor", () => {
     expect(saved[2].name).toBe("new_creature_3");
   });
 
-  it("adds an embedded move to the move list", async () => {
+  it("shows five duel-type checkboxes reflecting the creature's moves", async () => {
+    const user = userEvent.setup();
+    await renderEditor();
+    await user.click(screen.getByText("Burnling"));
+    for (const t of ["spirit", "water", "earth", "fire", "plant"]) {
+      expect(screen.getByLabelText(t)).toBeInTheDocument();
+    }
+    expect(screen.getByLabelText("fire")).toBeChecked();
+    expect(screen.getByLabelText("spirit")).toBeChecked();
+    expect(screen.getByLabelText("water")).not.toBeChecked();
+  });
+
+  it("round-trips toggled attack types through the api", async () => {
     const user = userEvent.setup();
     const api = await renderEditor();
     await user.click(screen.getByText("Floofer"));
-    await user.selectOptions(screen.getByLabelText("Add move"), "Ember");
-    await user.click(screen.getByRole("button", { name: "Add to list" }));
-    expect(screen.getByText("Ember", { selector: "td" })).toBeInTheDocument();
+    await user.click(screen.getByLabelText("water"));
+    expect(screen.getByLabelText("water")).toBeChecked();
     await user.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(api.saveCreatures).toHaveBeenCalledTimes(1));
     const saved = api.saveCreatures.mock.calls[0][0] as Creature[];
-    expect(saved[0].moveList).toHaveLength(1);
-    expect(saved[0].moveList[0]).toMatchObject({ id: 2, name: "Ember", power: 60 });
+    expect(saved[0].moves).toEqual(["spirit", "water"]);
   });
 });

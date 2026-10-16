@@ -39,11 +39,7 @@ const creatures: Creature[] = [
     spcdef: 5,
     hp: 30,
     spd: 12,
-    move1: 0,
-    move2: 0,
-    move3: 0,
-    move4: 0,
-    moveList: [],
+    moves: [],
   },
 ];
 

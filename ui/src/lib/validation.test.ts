@@ -4,7 +4,6 @@ import {
   emptyMove,
   hasFormErrors,
   maxId,
-  moveEntryFromMove,
   parseNonNegativeInt,
   validateCreatureForm,
   validateCreatureRecord,
@@ -107,7 +106,7 @@ describe("factories and helpers", () => {
     expect(c.id).toBe(9);
     expect(c.name).toBe("new_creature_9");
     expect(c.type1).toBe("none");
-    expect(c.moveList).toEqual([]);
+    expect(c.moves).toEqual([]);
   });
 
   it("creates a move with defaults", () => {
@@ -116,12 +115,6 @@ describe("factories and helpers", () => {
     expect(m.name).toBe("new_move_5");
     expect(m.accuracy).toBe(100);
     expect(m.effect).toBe("NONE");
-  });
-
-  it("copies moves into moveList entries", () => {
-    const m = emptyMove(7);
-    const entry = moveEntryFromMove(m);
-    expect(entry).toEqual({ ...m, id: 7 });
   });
 
   it("computes max id (or -1 when empty)", () => {

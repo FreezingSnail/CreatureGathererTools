@@ -1,7 +1,7 @@
 // Pure validation + parse helpers for the creature/move editors.
 // No React, no Tauri — unit-testable in isolation.
 
-import type { Creature, Move, MoveEntry } from "../editorTypes";
+import type { Creature, Move } from "../editorTypes";
 
 /** Parse a non-negative integer field. Returns null when malformed. */
 export function parseNonNegativeInt(raw: string): number | null {
@@ -152,11 +152,7 @@ export function emptyCreature(id: number): Creature {
     spcdef: 0,
     hp: 0,
     spd: 0,
-    move1: 0,
-    move2: 0,
-    move3: 0,
-    move4: 0,
-    moveList: [],
+    moves: [],
   };
 }
 
@@ -169,19 +165,6 @@ export function emptyMove(id: number): Move {
     physical: 0,
     accuracy: 100,
     effect: "NONE",
-  };
-}
-
-/** Copy a Move into an embedded MoveEntry (creature moveList rows). */
-export function moveEntryFromMove(m: Move): MoveEntry {
-  return {
-    id: m.id,
-    name: m.name,
-    type: m.type,
-    power: m.power,
-    physical: m.physical,
-    accuracy: m.accuracy,
-    effect: m.effect,
   };
 }
 

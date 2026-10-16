@@ -1,13 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { Creature, Move, MoveEntry } from "../editorTypes";
-import { CREATURE_TYPES } from "../editorTypes";
+import type { Creature } from "../editorTypes";
+import { CREATURE_TYPES, DUEL_TYPES } from "../editorTypes";
 import {
   emptyCreature,
   emptyCreatureFormErrors,
   hasFormErrors,
   maxId,
-  moveEntryFromMove,
   validateCreatureForm,
 } from "../lib/validation";
 import { Button } from "./ui/button";
@@ -21,13 +20,11 @@ import { NumberField, SelectField, TextField } from "./fields";
 export interface CreatureApi {
   loadCreatures: () => Promise<Creature[]>;
   saveCreatures: (creatures: Creature[]) => Promise<void>;
-  loadMoves: () => Promise<Move[]>;
 }
 
 const defaultApi: CreatureApi = {
   loadCreatures: () => invoke("load_creatures"),
   saveCreatures: (creatures) => invoke("save_creatures", { creatures }),
-  loadMoves: () => invoke("load_moves"),
 };
 
 interface Draft {
@@ -41,14 +38,10 @@ interface Draft {
   spcdef: string;
   hp: string;
   spd: string;
-  move1: string;
-  move2: string;
-  move3: string;
-  move4: string;
-  moveList: MoveEntry[];
+  moves: string[];
 }
 
-function toDraft(c: Creature, moveNameById: Map<number, string>): Draft {
+function toDraft(c: Creature): Draft {
   return {
     name: c.name,
     type1: c.type1,
@@ -60,42 +53,26 @@ function toDraft(c: Creature, moveNameById: Map<number, string>): Draft {
     spcdef: String(c.spcdef),
     hp: String(c.hp),
     spd: String(c.spd),
-    move1: moveNameById.get(c.move1) ?? "",
-    move2: moveNameById.get(c.move2) ?? "",
-    move3: moveNameById.get(c.move3) ?? "",
-    move4: moveNameById.get(c.move4) ?? "",
-    moveList: c.moveList,
+    moves: [...c.moves],
   };
 }
 
 export function CreatureEditor({ api = defaultApi }: { api?: CreatureApi }) {
   const [creatures, setCreatures] = useState<Creature[]>([]);
-  const [moves, setMoves] = useState<Move[]>([]);
   const [selected, setSelected] = useState(-1);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [errors, setErrors] = useState(emptyCreatureFormErrors());
-  const [addMoveName, setAddMoveName] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [statusError, setStatusError] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
-  const moveNameById = useMemo(
-    () => new Map(moves.map((m) => [m.id, m.name])),
-    [moves]
-  );
-  const moveIdByName = useMemo(
-    () => new Map(moves.map((m) => [m.name, m.id])),
-    [moves]
-  );
-  const moveNames = useMemo(() => moves.map((m) => m.name), [moves]);
-
   useEffect(() => {
     let cancelled = false;
-    Promise.all([api.loadCreatures(), api.loadMoves()])
-      .then(([cs, ms]) => {
+    api
+      .loadCreatures()
+      .then((cs) => {
         if (cancelled) return;
         setCreatures(cs);
-        setMoves(ms);
         setLoaded(true);
       })
       .catch((e) => {
@@ -112,7 +89,7 @@ export function CreatureEditor({ api = defaultApi }: { api?: CreatureApi }) {
   const populate = (idx: number) => {
     if (idx < 0 || idx >= creatures.length) return;
     setSelected(idx);
-    setDraft(toDraft(creatures[idx], moveNameById));
+    setDraft(toDraft(creatures[idx]));
     setErrors(emptyCreatureFormErrors());
     setStatus(null);
     setStatusError(false);
@@ -143,11 +120,7 @@ export function CreatureEditor({ api = defaultApi }: { api?: CreatureApi }) {
       spcdef: Number(draft.spcdef),
       hp: Number(draft.hp),
       spd: Number(draft.spd),
-      move1: moveIdByName.get(draft.move1) ?? 0,
-      move2: moveIdByName.get(draft.move2) ?? 0,
-      move3: moveIdByName.get(draft.move3) ?? 0,
-      move4: moveIdByName.get(draft.move4) ?? 0,
-      moveList: draft.moveList,
+      moves: draft.moves,
     };
     const updated = creatures.map((c, i) => (i === selected ? next : c));
     setCreatures(updated);
@@ -168,7 +141,7 @@ export function CreatureEditor({ api = defaultApi }: { api?: CreatureApi }) {
     try {
       await api.saveCreatures(updated);
       setSelected(updated.length - 1);
-      setDraft(toDraft(updated[updated.length - 1], moveNameById));
+      setDraft(toDraft(updated[updated.length - 1]));
       setErrors(emptyCreatureFormErrors());
       setStatusError(false);
       setStatus(`added creature ${nextId}`);
@@ -186,7 +159,7 @@ export function CreatureEditor({ api = defaultApi }: { api?: CreatureApi }) {
       await api.saveCreatures(updated);
       const nextSel = Math.min(selected, updated.length - 1);
       setSelected(updated.length > 0 ? nextSel : -1);
-      setDraft(updated.length > 0 ? toDraft(updated[nextSel], moveNameById) : null);
+      setDraft(updated.length > 0 ? toDraft(updated[nextSel]) : null);
       setErrors(emptyCreatureFormErrors());
       setStatusError(false);
       setStatus("deleted creature");
@@ -196,19 +169,12 @@ export function CreatureEditor({ api = defaultApi }: { api?: CreatureApi }) {
     }
   };
 
-  const addMoveToList = () => {
+  const toggleMove = (type: string, on: boolean) => {
     if (!draft) return;
-    const move = moves.find((m) => m.name === addMoveName);
-    if (!move) return;
-    setDraftField("moveList", [...draft.moveList, moveEntryFromMove(move)]);
-  };
-
-  const removeMoveFromList = (index: number) => {
-    if (!draft) return;
-    setDraftField(
-      "moveList",
-      draft.moveList.filter((_, i) => i !== index)
-    );
+    const set = new Set(draft.moves);
+    if (on) set.add(type);
+    else set.delete(type);
+    setDraftField("moves", DUEL_TYPES.filter((t) => set.has(t)));
   };
 
   if (!loaded) return <div data-testid="creature-loading">loading creatures…</div>;
@@ -331,85 +297,27 @@ export function CreatureEditor({ api = defaultApi }: { api?: CreatureApi }) {
               />
             </div>
 
-            <div className="grid grid-cols-4 gap-2 border-t pt-3">
-              <SelectField
-                label="Move 1"
-                value={draft.move1}
-                options={moveNames.length ? moveNames : [""]}
-                onChange={(v) => setDraftField("move1", v)}
-              />
-              <SelectField
-                label="Move 2"
-                value={draft.move2}
-                options={moveNames.length ? moveNames : [""]}
-                onChange={(v) => setDraftField("move2", v)}
-              />
-              <SelectField
-                label="Move 3"
-                value={draft.move3}
-                options={moveNames.length ? moveNames : [""]}
-                onChange={(v) => setDraftField("move3", v)}
-              />
-              <SelectField
-                label="Move 4"
-                value={draft.move4}
-                options={moveNames.length ? moveNames : [""]}
-                onChange={(v) => setDraftField("move4", v)}
-              />
-            </div>
-
             <div className="border-t pt-3">
-              <CardTitle className="mb-3">Move list</CardTitle>
-              <div className="mb-3 grid grid-cols-3 items-end gap-2">
-                <SelectField
-                  label="Add move"
-                  value={addMoveName}
-                  options={moveNames.length ? moveNames : [""]}
-                  onChange={setAddMoveName}
-                />
-                <Button type="button" onClick={addMoveToList} disabled={!addMoveName}>
-                  Add to list
-                </Button>
+              <CardTitle className="mb-3">Attack types</CardTitle>
+              <div className="flex flex-wrap gap-4">
+                {DUEL_TYPES.map((t) => {
+                  const id = `creature-move-${t}`;
+                  return (
+                    <div key={t} className="flex items-center gap-2">
+                      <input
+                        id={id}
+                        type="checkbox"
+                        className="h-4 w-4"
+                        checked={draft.moves.includes(t)}
+                        onChange={(e) => toggleMove(t, e.target.checked)}
+                      />
+                      <Label htmlFor={id} className="cursor-pointer capitalize">
+                        {t}
+                      </Label>
+                    </div>
+                  );
+                })}
               </div>
-              {draft.moveList.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No moves in list.</p>
-              ) : (
-                <table className="w-full border-collapse text-sm">
-                  <thead>
-                    <tr>
-                      <th className="border px-2 py-1 text-left">Name</th>
-                      <th className="border px-2 py-1 text-left">Type</th>
-                      <th className="border px-2 py-1 text-left">Power</th>
-                      <th className="border px-2 py-1 text-left">Phys</th>
-                      <th className="border px-2 py-1 text-left">Acc</th>
-                      <th className="border px-2 py-1 text-left">Effect</th>
-                      <th className="border px-2 py-1 text-left" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {draft.moveList.map((me, i) => (
-                      <tr key={`${me.id}-${i}`}>
-                        <td className="border px-2 py-1">{me.name}</td>
-                        <td className="border px-2 py-1">{me.type}</td>
-                        <td className="border px-2 py-1">{me.power}</td>
-                        <td className="border px-2 py-1">{me.physical ? "Phys" : "Spec"}</td>
-                        <td className="border px-2 py-1">{me.accuracy}</td>
-                        <td className="border px-2 py-1">{me.effect}</td>
-                        <td className="border px-2 py-1">
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => removeMoveFromList(i)}
-                          >
-                            Remove
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
             </div>
 
             <div className="flex gap-2">
