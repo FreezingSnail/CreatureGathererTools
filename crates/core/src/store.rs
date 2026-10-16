@@ -402,6 +402,7 @@ mod tests {
             duel: None,
             fx_layout: None,
             blocks_json: None,
+            beta_area: None,
         }
     }
 
@@ -555,6 +556,7 @@ mod tests {
             duel: None,
             fx_layout: None,
             blocks_json: None,
+            beta_area: None,
         };
         let s = Store::new(&c);
         assert!(s.load_creatures().is_err(), "expected error");
@@ -584,6 +586,7 @@ mod tests {
             duel: None,
             fx_layout: None,
             blocks_json: None,
+            beta_area: None,
         };
         let s = Store::new(&c);
         let m = s.load_map().expect("partial map must load like Go");
@@ -610,6 +613,7 @@ mod tests {
             duel: None,
             fx_layout: None,
             blocks_json: None,
+            beta_area: None,
         };
         let s = Store::new(&c);
         assert!(s.load_map().is_err(), "expected error");

@@ -33,6 +33,15 @@ pub struct Config {
     pub arena_demo: Option<String>,
     #[serde(default, rename = "duel", skip_serializing_if = "Option::is_none")]
     pub duel: Option<String>,
+    /// First-beta content contract (`data/beta-area.toml`). When set, the
+    /// generator derives and validates the first-area material/plant/heal
+    /// reward mappings before packing.
+    #[serde(
+        default,
+        rename = "beta_area",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub beta_area: Option<String>,
     #[serde(default, rename = "fx_layout", skip_serializing_if = "Option::is_none")]
     pub fx_layout: Option<String>,
     /// Project-level tile block library shared by the map editor and WFC.
@@ -85,6 +94,9 @@ impl Config {
         }
         if let Some(duel) = &mut self.duel {
             resolve_relative_path(duel, config_dir);
+        }
+        if let Some(beta_area) = &mut self.beta_area {
+            resolve_relative_path(beta_area, config_dir);
         }
         if let Some(fx_layout) = &mut self.fx_layout {
             resolve_relative_path(fx_layout, config_dir);

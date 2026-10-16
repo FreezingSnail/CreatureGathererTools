@@ -1163,6 +1163,7 @@ mod tests {
             duel: None,
             fx_layout: None,
             blocks_json: None,
+            beta_area: None,
         }
     }
 

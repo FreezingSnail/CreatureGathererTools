@@ -23,6 +23,9 @@ pub struct FixtureProject<'a> {
     pub arena: &'a [ArenaEntry],
     pub map: &'a GameMap,
     pub scripts: &'a [u8],
+    /// First-area reward mapping fixture, present when the project declares a
+    /// beta-area contract.
+    pub rewards: Option<&'a crate::rewards::RewardMapping>,
 }
 
 /// Emits all headers consumed by `tst/fxdatatest` into `dir`.
@@ -57,6 +60,9 @@ pub fn emit_fixtures(
     write(dir, "rawread_data.hpp", rawread_header(processed.opponents)?)?;
     write(dir, "map_data.hpp", map_header(processed.map)?)?;
     write(dir, "script_data.hpp", script_header(processed.scripts)?)?;
+    if let Some(rewards) = processed.rewards {
+        write(dir, "reward_data.hpp", reward_header(rewards))?;
+    }
     Ok(())
 }
 
@@ -281,6 +287,46 @@ fn map_header(map: &GameMap) -> Result<String, BuildError> {
         selected.len()
     ));
     Ok(output)
+}
+
+fn reward_fixture_array(name: &str, values: &[u8]) -> String {
+    let joined = values
+        .iter()
+        .map(|value| value.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("const uint8_t {name}[] PROGMEM = {{ {joined} }};\n")
+}
+
+fn reward_header(rewards: &crate::rewards::RewardMapping) -> String {
+    let mut output =
+        format!("{BANNER}#pragma once\n#include <stdint.h>\n#include <avr/pgmspace.h>\n\n");
+    output.push_str("// Model fixture for the packed Rewards mapping (jp8.11.3).\n");
+    output.push_str("namespace RewardFixture {\n");
+    output.push_str(&reward_fixture_array(
+        "materialItem",
+        &rewards.material_item,
+    ));
+    output.push_str(&reward_fixture_array(
+        "materialCount",
+        &rewards.material_count,
+    ));
+    output.push_str(&reward_fixture_array("plantItem", &[rewards.plant_item]));
+    output.push_str(&reward_fixture_array("plantCount", &[rewards.plant_count]));
+    let heal_items: Vec<u8> = rewards.heals.iter().map(|heal| heal.item).collect();
+    let heal_counts: Vec<u8> = rewards.heals.iter().map(|heal| heal.count).collect();
+    output.push_str(&reward_fixture_array("healItem", &heal_items));
+    output.push_str(&reward_fixture_array("healCount", &heal_counts));
+    output.push_str(&format!(
+        "constexpr uint8_t speciesCount = {};\n",
+        rewards.species_count
+    ));
+    output.push_str(&format!(
+        "constexpr uint8_t healRewardCount = {};\n",
+        rewards.heals.len()
+    ));
+    output.push_str("} // namespace RewardFixture\n");
+    output
 }
 
 fn script_header(scripts: &[u8]) -> Result<String, BuildError> {

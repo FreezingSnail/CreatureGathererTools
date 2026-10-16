@@ -65,6 +65,7 @@ fn emitted_headers_are_model_derived_and_device_structural() {
             arena: &arena,
             map: &map,
             scripts: &script_bytes,
+            rewards: None,
         },
         &destination,
     )

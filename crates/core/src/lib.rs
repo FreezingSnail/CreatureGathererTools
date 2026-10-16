@@ -13,6 +13,7 @@ pub mod manifest;
 pub mod model;
 pub mod parser;
 pub mod processor;
+pub mod rewards;
 pub mod script;
 pub mod store;
 pub mod tiled;
@@ -477,6 +478,25 @@ fn run_project_with_options(
         .map(|path| duel::load(path, &creatures, &opponents))
         .transpose()
         .with_context(|| "Loading duel data")?;
+    let rewards = cfg
+        .beta_area
+        .as_deref()
+        .map(|path| {
+            let consumables_csv = project_root.join("data/consumables.csv");
+            let consumables = builder::load_consumables_csv(&consumables_csv).map_err(|e| {
+                crate::builder::BuildError(format!(
+                    "loading consumables from {}: {e}",
+                    consumables_csv.display()
+                ))
+            })?;
+            rewards::load(path, &creatures, &consumables)
+        })
+        .transpose()
+        .with_context(|| "Loading first-area reward mappings")?;
+    if let Some(rewards) = &rewards {
+        rewards::write_reward_descriptor(Path::new(&cfg.output_dir), rewards)
+            .with_context(|| "Emitting first-area reward mapping")?;
+    }
     if let Some(catalog) = &arena_demo {
         arena_demo::emit(
             catalog,
@@ -531,6 +551,7 @@ fn run_project_with_options(
             arena: &arena,
             map: &map,
             scripts: &map_artifacts.scripts_bin,
+            rewards: rewards.as_ref(),
         };
         fixtures::emit_fixtures(&processed, fixture_dir)
             .with_context(|| format!("Writing fixtures to {fixture_dir}"))?;
@@ -592,6 +613,13 @@ fn run_project_with_options(
             output_dir,
             "duel_ids.hpp",
             source,
+        ));
+    }
+    if let Some(source) = cfg.beta_area.as_deref().filter(|_| rewards.is_some()) {
+        artifact_inputs.push(manifest::ArtifactInput::in_output(
+            output_dir,
+            "rewards.txt",
+            Path::new(source),
         ));
     }
     if canonical_creature.is_file() {

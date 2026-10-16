@@ -52,6 +52,7 @@ fn load_creatures() -> Vec<creaturevm::model::Creature> {
         duel: None,
         fx_layout: None,
         blocks_json: None,
+        beta_area: None,
     };
     Store::new(&cfg)
         .load_creatures()
