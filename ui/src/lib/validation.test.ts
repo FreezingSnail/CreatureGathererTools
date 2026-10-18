@@ -37,12 +37,7 @@ describe("validateCreatureForm", () => {
   const good = {
     name: "Floofer",
     evelevel: "12",
-    atk: "1",
-    deff: "2",
-    spcatk: "3",
-    spcdef: "4",
     hp: "5",
-    spd: "6",
   };
 
   it("accepts a complete valid form", () => {
@@ -55,9 +50,9 @@ describe("validateCreatureForm", () => {
     expect(e.name).toBe("Name must not be empty");
   });
 
-  it("rejects negative stats", () => {
-    const e = validateCreatureForm({ ...good, atk: "-3" });
-    expect(e.atk).toBe("ATK must be a non-negative integer");
+  it("rejects a negative HP seed", () => {
+    const e = validateCreatureForm({ ...good, hp: "-3" });
+    expect(e.hp).toBe("HP must be a non-negative integer");
   });
 
   it("rejects non-integer stats", () => {
@@ -84,8 +79,8 @@ describe("record-level validation", () => {
   it("validates a full creature record", () => {
     const c = emptyCreature(3);
     expect(validateCreatureRecord(c)).toEqual([]);
-    expect(validateCreatureRecord({ ...c, atk: -1 })).toContain(
-      "atk not a non-negative integer"
+    expect(validateCreatureRecord({ ...c, hp: -1 })).toContain(
+      "hp not a non-negative integer"
     );
     expect(validateCreatureRecord({ ...c, name: "" })).toContain("creature name empty");
   });

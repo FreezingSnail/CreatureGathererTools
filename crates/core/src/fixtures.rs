@@ -94,17 +94,12 @@ fn creature_header(creatures: &[Creature]) -> Result<String, BuildError> {
     output.push_str("const CreatureData_t creatureFixtures[] PROGMEM = {\n");
     for creature in creatures {
         output.push_str(&format!(
-            "    {{ {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {} }},\n",
+            "    {{ {}, {}, {}, {}, {}, {} }},\n",
             creature.id,
             creature_type(&creature.type1)?,
             creature_type(&creature.type2)?,
             creature.evo_level,
-            creature.atk,
-            creature.def,
-            creature.spc_atk,
-            creature.spc_def,
             creature.hp,
-            creature.spd,
             attack_mask(&creature.moves),
         ));
     }

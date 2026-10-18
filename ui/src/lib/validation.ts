@@ -25,52 +25,28 @@ export function validNonEmpty(raw: string): boolean {
 export interface CreatureFormErrors {
   name: string | null;
   evelevel: string | null;
-  atk: string | null;
-  deff: string | null;
-  spcatk: string | null;
-  spcdef: string | null;
   hp: string | null;
-  spd: string | null;
 }
 
 export function emptyCreatureFormErrors(): CreatureFormErrors {
   return {
     name: null,
     evelevel: null,
-    atk: null,
-    deff: null,
-    spcatk: null,
-    spcdef: null,
     hp: null,
-    spd: null,
   };
 }
 
 export function validateCreatureForm(f: {
   name: string;
   evelevel: string;
-  atk: string;
-  deff: string;
-  spcatk: string;
-  spcdef: string;
   hp: string;
-  spd: string;
 }): CreatureFormErrors {
   return {
     name: validNonEmpty(f.name) ? null : "Name must not be empty",
     evelevel: validNonNegativeInt(f.evelevel)
       ? null
       : "Evo level must be a non-negative integer",
-    atk: validNonNegativeInt(f.atk) ? null : "ATK must be a non-negative integer",
-    deff: validNonNegativeInt(f.deff) ? null : "DEF must be a non-negative integer",
-    spcatk: validNonNegativeInt(f.spcatk)
-      ? null
-      : "SPC ATK must be a non-negative integer",
-    spcdef: validNonNegativeInt(f.spcdef)
-      ? null
-      : "SPC DEF must be a non-negative integer",
     hp: validNonNegativeInt(f.hp) ? null : "HP must be a non-negative integer",
-    spd: validNonNegativeInt(f.spd) ? null : "SPD must be a non-negative integer",
   };
 }
 
@@ -112,12 +88,7 @@ export function validateCreatureRecord(c: Creature): string[] {
   if (!Number.isSafeInteger(c.id)) errs.push("creature id not an integer");
   for (const [key, val] of [
     ["evelevel", c.evelevel],
-    ["atk", c.atk],
-    ["deff", c.deff],
-    ["spcatk", c.spcatk],
-    ["spcdef", c.spcdef],
     ["hp", c.hp],
-    ["spd", c.spd],
   ] as const) {
     if (!Number.isSafeInteger(val) || val < 0) errs.push(`${key} not a non-negative integer`);
   }
@@ -146,12 +117,7 @@ export function emptyCreature(id: number): Creature {
     type1: "none",
     type2: "none",
     evelevel: 0,
-    atk: 0,
-    deff: 0,
-    spcatk: 0,
-    spcdef: 0,
     hp: 0,
-    spd: 0,
     moves: [],
   };
 }

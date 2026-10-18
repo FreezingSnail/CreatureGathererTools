@@ -8,12 +8,17 @@ export interface Creature {
   type1: string;
   type2: string;
   evelevel: number;
-  atk: number;
-  deff: number;
-  spcatk: number;
-  spcdef: number;
   hp: number;
-  spd: number;
+  /**
+   * Retired stat seeds (CreatureGathererFX-rhs7.3). The model and duel keep
+   * only `hp`; these stay optional so stale older authoring fixtures still
+   * typecheck, and the editor never writes them back.
+   */
+  atk?: number;
+  deff?: number;
+  spcatk?: number;
+  spcdef?: number;
+  spd?: number;
   /** Known attack types, authored 8-type names (e.g. ["spirit","water"]). */
   moves: string[];
 }

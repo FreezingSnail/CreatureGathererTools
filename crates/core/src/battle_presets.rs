@@ -234,12 +234,7 @@ moves = ["none"]
             type1: "wind".into(),
             type2: "none".into(),
             evo_level: 0,
-            atk: 1,
-            def: 1,
-            spc_atk: 1,
-            spc_def: 1,
             hp: 1,
-            spd: 1,
             evolves_to: None,
             moves: vec![],
         }

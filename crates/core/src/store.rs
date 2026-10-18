@@ -417,12 +417,7 @@ mod tests {
         assert_eq!(creatures[0].type1, "wind");
         assert_eq!(creatures[0].type2, "none");
         assert_eq!(creatures[0].evo_level, 8);
-        assert_eq!(creatures[0].atk, 3);
-        assert_eq!(creatures[0].def, 3);
-        assert_eq!(creatures[0].spc_atk, 2);
-        assert_eq!(creatures[0].spc_def, 2);
         assert_eq!(creatures[0].hp, 3);
-        assert_eq!(creatures[0].spd, 3);
         assert_eq!(creatures[0].moves, vec!["water".to_string()]);
         assert_eq!(creatures[1].name, "NewOne");
         assert_eq!(creatures[1].id, 99);
@@ -712,28 +707,20 @@ mod tests {
     #[test]
     fn json_keys_match_go_tags() {
         // Assert that the serialized JSON keys are exactly the authored tags,
-        // including the rename cases (evelevel/deff/spcatk/spcdef/...).
+        // including the rename case (evelevel).
         let c = Creature {
             name: "N".to_string(),
             id: 1,
             type1: "wind".to_string(),
             type2: "none".to_string(),
             evo_level: 5,
-            atk: 1,
-            def: 2,
-            spc_atk: 3,
-            spc_def: 4,
             hp: 5,
-            spd: 6,
             evolves_to: None,
             moves: vec!["water".to_string()],
         };
         let v: serde_json::Value = serde_json::to_value(&c).unwrap();
         let o = v.as_object().unwrap();
-        for key in [
-            "name", "id", "type1", "type2", "evelevel", "atk", "deff", "spcatk", "spcdef", "hp",
-            "spd", "moves",
-        ] {
+        for key in ["name", "id", "type1", "type2", "evelevel", "hp", "moves"] {
             assert!(o.contains_key(key), "missing key {key}");
         }
         assert!(!o.contains_key("evo_level"));

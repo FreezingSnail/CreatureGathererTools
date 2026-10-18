@@ -32,12 +32,7 @@ interface Draft {
   type1: string;
   type2: string;
   evelevel: string;
-  atk: string;
-  deff: string;
-  spcatk: string;
-  spcdef: string;
   hp: string;
-  spd: string;
   moves: string[];
 }
 
@@ -47,12 +42,7 @@ function toDraft(c: Creature): Draft {
     type1: c.type1,
     type2: c.type2,
     evelevel: String(c.evelevel),
-    atk: String(c.atk),
-    deff: String(c.deff),
-    spcatk: String(c.spcatk),
-    spcdef: String(c.spcdef),
     hp: String(c.hp),
-    spd: String(c.spd),
     moves: [...c.moves],
   };
 }
@@ -114,12 +104,7 @@ export function CreatureEditor({ api = defaultApi }: { api?: CreatureApi }) {
       type1: draft.type1,
       type2: draft.type2,
       evelevel: Number(draft.evelevel),
-      atk: Number(draft.atk),
-      deff: Number(draft.deff),
-      spcatk: Number(draft.spcatk),
-      spcdef: Number(draft.spcdef),
       hp: Number(draft.hp),
-      spd: Number(draft.spd),
       moves: draft.moves,
     };
     const updated = creatures.map((c, i) => (i === selected ? next : c));
@@ -258,42 +243,10 @@ export function CreatureEditor({ api = defaultApi }: { api?: CreatureApi }) {
             </div>
             <div className="grid grid-cols-3 gap-2">
               <NumberField
-                label="ATK"
-                value={draft.atk}
-                onChange={(v) => setDraftField("atk", v)}
-                error={errors.atk}
-              />
-              <NumberField
-                label="DEF"
-                value={draft.deff}
-                onChange={(v) => setDraftField("deff", v)}
-                error={errors.deff}
-              />
-              <NumberField
-                label="SPC ATK"
-                value={draft.spcatk}
-                onChange={(v) => setDraftField("spcatk", v)}
-                error={errors.spcatk}
-              />
-            </div>
-            <div className="grid grid-cols-3 gap-2">
-              <NumberField
-                label="SPC DEF"
-                value={draft.spcdef}
-                onChange={(v) => setDraftField("spcdef", v)}
-                error={errors.spcdef}
-              />
-              <NumberField
                 label="HP"
                 value={draft.hp}
                 onChange={(v) => setDraftField("hp", v)}
                 error={errors.hp}
-              />
-              <NumberField
-                label="SPD"
-                value={draft.spd}
-                onChange={(v) => setDraftField("spd", v)}
-                error={errors.spd}
               />
             </div>
 

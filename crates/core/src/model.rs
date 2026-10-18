@@ -113,15 +113,10 @@ pub struct Creature {
     pub type2: String,
     #[serde(rename = "evelevel")]
     pub evo_level: i32,
-    pub atk: i32,
-    #[serde(rename = "deff")]
-    pub def: i32,
-    #[serde(rename = "spcatk")]
-    pub spc_atk: i32,
-    #[serde(rename = "spcdef")]
-    pub spc_def: i32,
+    /// Authored HP seed. The duel derives max HP as
+    /// `2*level + hpSeed*(level/3) + 30`; every other stat seed was retired
+    /// (CreatureGathererFX-rhs7.3) because the duel reads only HP.
     pub hp: i32,
-    pub spd: i32,
     /// Explicit first-stage evolution target species id (jp8.11.11), or `None`
     /// when the species does not evolve at this revision. `id + 1` is not a
     /// valid relation: the target is authored per species and cross-checked by

@@ -5,12 +5,7 @@
     "type1": "wind",
     "type2": "none",
     "evelevel": 8,
-    "atk": 3,
-    "deff": 3,
-    "spcatk": 2,
-    "spcdef": 2,
     "hp": 3,
-    "spd": 3,
     "moves": ["water"]
   },
   {
@@ -19,12 +14,7 @@
     "type1": "none",
     "type2": "none",
     "evelevel": 1,
-    "atk": 1,
-    "deff": 1,
-    "spcatk": 1,
-    "spcdef": 1,
     "hp": 1,
-    "spd": 1,
     "moves": ["spirit"]
   }
 ]

@@ -11,12 +11,7 @@ const creatures: Creature[] = [
     type1: "spirit",
     type2: "none",
     evelevel: 0,
-    atk: 10,
-    deff: 8,
-    spcatk: 6,
-    spcdef: 5,
     hp: 30,
-    spd: 12,
     moves: ["spirit"],
   },
   {
@@ -25,12 +20,7 @@ const creatures: Creature[] = [
     type1: "fire",
     type2: "none",
     evelevel: 16,
-    atk: 12,
-    deff: 4,
-    spcatk: 14,
-    spcdef: 6,
     hp: 25,
-    spd: 9,
     moves: ["fire", "spirit"],
   },
 ];
@@ -66,7 +56,7 @@ describe("CreatureEditor", () => {
     const name = screen.getByLabelText("Name") as HTMLInputElement;
     expect(name.value).toBe("Burnling");
     expect(screen.getByLabelText("HP")).toHaveValue("25");
-    expect(screen.getByLabelText("SPD")).toHaveValue("9");
+    expect(screen.getByLabelText("Evo level")).toHaveValue("16");
   });
 
   it("saves edits through the api", async () => {
@@ -84,15 +74,15 @@ describe("CreatureEditor", () => {
     expect(await screen.findByRole("status")).toHaveTextContent(/saved 2 creatures/);
   });
 
-  it("rejects malformed stats client-side and does not save", async () => {
+  it("rejects a malformed HP seed client-side and does not save", async () => {
     const user = userEvent.setup();
     const api = await renderEditor();
     await user.click(screen.getByText("Floofer"));
-    const atk = screen.getByLabelText("ATK");
-    await user.clear(atk);
-    await user.type(atk, "-5");
+    const hp = screen.getByLabelText("HP");
+    await user.clear(hp);
+    await user.type(hp, "-5");
     await user.click(screen.getByRole("button", { name: "Save" }));
-    expect(await screen.findByText("ATK must be a non-negative integer")).toBeInTheDocument();
+    expect(await screen.findByText("HP must be a non-negative integer")).toBeInTheDocument();
     expect(api.saveCreatures).not.toHaveBeenCalled();
   });
 

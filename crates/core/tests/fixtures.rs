@@ -55,7 +55,7 @@ fn emitted_headers_are_model_derived_and_device_structural() {
 
     // Mutating parsed data before emission proves the emitter does not re-dump
     // any writer artifact: the emitted creature row must reflect the change.
-    creatures[0].atk = 31;
+    creatures[0].hp = 31;
     let destination =
         std::env::temp_dir().join(format!("cgfx-tools-fixtures-{}", std::process::id()));
     emit_fixtures(
@@ -84,8 +84,8 @@ fn emitted_headers_are_model_derived_and_device_structural() {
 
     let creature = read("creature_data.hpp");
     assert!(creature.contains("const CreatureData_t creatureFixtures[] PROGMEM"));
-    assert!(creature.contains("{ 0, 2, 15, 8, 31, 3, 2, 2, 3, 3, 2 }"));
-    assert!(creature.contains("{ 99, 15, 15, 1, 1, 1, 1, 1, 1, 1, 1 }"));
+    assert!(creature.contains("{ 0, 2, 15, 8, 31, 2 }"));
+    assert!(creature.contains("{ 99, 15, 15, 1, 1, 1 }"));
 
     let opponents = read("opponent_data.hpp");
     assert!(opponents.contains("const OpponentSeed opponentSeeds[] PROGMEM"));

@@ -312,17 +312,17 @@ fn creatures_pipeline_matches_go_bytes() {
     let creatures = load_creatures();
     let (bin, hpp) = build_creatures(&creatures).expect("build_creatures");
     // Go reference (creatures_test.go + fixtures): SquibbleSnail then NewOne.
-    // Records are 11 bytes: id, type1, type2, evo, atk, def, spc_atk, spc_def,
-    // hp, spd, folded attack mask (Go type encoding: none = 8).
+    // Records are 6 bytes: id, type1, type2, evo, hp seed, folded attack mask
+    // (Go type encoding: none = 8).
     assert_eq!(
         bin,
         vec![
-            0, 2, 8, 8, 3, 3, 2, 2, 3, 3, 2, // SquibbleSnail (water mask)
-            99, 8, 8, 1, 1, 1, 1, 1, 1, 1, 1, // NewOne (spirit mask)
+            0, 2, 8, 8, 3, 2, // SquibbleSnail (water mask)
+            99, 8, 8, 1, 1, 1, // NewOne (spirit mask)
         ]
     );
     assert!(hpp.contains("uint8_t creatureData[]"));
-    assert!(hpp.contains("{0, 2, 8, 8, 3, 3, 2, 2, 3, 3, 2},"));
+    assert!(hpp.contains("{0, 2, 8, 8, 3, 2},"));
 }
 
 // ─────────────────────────────────────────────────────────────────────
