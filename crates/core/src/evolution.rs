@@ -179,6 +179,21 @@ mod tests {
         ]
     }
 
+    fn chained_edges() -> Vec<Creature> {
+        // Full three-link starter chains 0->1->2, 3->4->5, 6->7->8.
+        vec![
+            creature(0, 8, Some(1), &["water"]),
+            creature(1, 16, Some(2), &["water"]),
+            creature(2, 24, None, &["water", "plant"]),
+            creature(3, 8, Some(4), &["earth"]),
+            creature(4, 16, Some(5), &["earth", "fire"]),
+            creature(5, 24, None, &["earth", "lightning"]),
+            creature(6, 8, Some(7), &["water"]),
+            creature(7, 16, Some(8), &["water"]),
+            creature(8, 24, None, &["water", "fire"]),
+        ]
+    }
+
     #[test]
     fn derives_exactly_the_three_first_beta_edges_in_order() {
         let edges = validate_evolutions(&first_beta_edges()).expect("valid edges");
@@ -209,6 +224,50 @@ mod tests {
             "{descriptor}"
         );
         assert!(descriptor.ends_with("} namespace_end\n"), "{descriptor}");
+    }
+
+    #[test]
+    fn accepts_three_link_chains_and_pins_their_arrays() {
+        let edges = validate_evolutions(&chained_edges()).expect("valid chains");
+        assert_eq!(
+            edges,
+            vec![
+                EvolutionEdge { from_id: 0, to_id: 1, level: 8 },
+                EvolutionEdge { from_id: 1, to_id: 2, level: 16 },
+                EvolutionEdge { from_id: 3, to_id: 4, level: 8 },
+                EvolutionEdge { from_id: 4, to_id: 5, level: 16 },
+                EvolutionEdge { from_id: 6, to_id: 7, level: 8 },
+                EvolutionEdge { from_id: 7, to_id: 8, level: 16 },
+            ]
+        );
+        let descriptor = build_fx_evolution_descriptor(&chained_edges()).expect("descriptor");
+        assert!(
+            descriptor.contains("uint8_t evolutionSource[] = { 0, 1, 3, 4, 6, 7 };"),
+            "{descriptor}"
+        );
+        assert!(
+            descriptor.contains("uint8_t evolutionTarget[] = { 1, 2, 4, 5, 7, 8 };"),
+            "{descriptor}"
+        );
+        assert!(
+            descriptor.contains("uint8_t evolutionLevel[] = { 8, 16, 8, 16, 8, 16 };"),
+            "{descriptor}"
+        );
+    }
+
+    #[test]
+    fn a_chain_middle_is_not_rejected_as_a_cycle() {
+        // 0->1->2 walks forward and terminates: a chain, never a cycle.
+        assert!(validate_evolutions(&chained_edges()).is_ok());
+    }
+
+    #[test]
+    fn a_back_edge_in_a_chain_is_rejected() {
+        let mut creatures = chained_edges();
+        // species 7 already evolves to 8; point it back at 6 to close 6->7->6.
+        creatures[7].evolves_to = Some(6);
+        let error = validate_evolutions(&creatures).expect_err("back edge must fail");
+        assert!(error.0.contains("cyclic evolution edges"), "{error}");
     }
 
     #[test]
